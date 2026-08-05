@@ -4,12 +4,6 @@
         meterToken: '',
     };
 
-    // Fallback prices (USD per 1M tokens) used only while the plugin's /pricing endpoint is unreachable.
-    const fallbackModels = {
-        'deepseek-v4-flash': { cache_hit: 0.0028, cache_miss: 0.14, output: 0.28 },
-        'deepseek-v4-pro': { cache_hit: 0.003625, cache_miss: 0.435, output: 0.87 },
-    };
-
     const context = SillyTavern.getContext();
     const { eventSource, event_types, extensionSettings, SlashCommand, SlashCommandParser, renderExtensionTemplateAsync, callGenericPopup, POPUP_TYPE } = context;
     extensionSettings[KEY] = { ...defaults, ...(extensionSettings[KEY] ?? {}) };
@@ -17,8 +11,8 @@
 
     // Live pricing state, refreshed from the server plugin (which pulls it from deepseek.com).
     let pricing = {
-        models: fallbackModels,
-        effective: fallbackModels,
+        models: {},
+        effective: {},
         peak: false,
         peakMultiplier: 2,
         peakHours: [],
@@ -113,7 +107,6 @@
             }
             return response;
         };
-        patched.__dsumPatched = true;
         window.fetch = patched;
     }
 
@@ -125,11 +118,11 @@
 
     const priceFor = model => pricing.effective[model]
         ?? pricing.models[model]
-        ?? Object.values(pricing.effective)[0]
-        ?? fallbackModels['deepseek-v4-flash'];
+        ?? Object.values(pricing.effective)[0];
 
     function cost(usage) {
         const p = priceFor(usage.model);
+        if (!p) return 0;
         return (usage.prompt_cache_hit_tokens * p.cache_hit
             + usage.prompt_cache_miss_tokens * p.cache_miss
             + usage.completion_tokens * p.output) / 1_000_000;
@@ -281,10 +274,12 @@
             message.extra.deepseekUsageBySwipe[message.swipe_id ?? 0] = record;
             message.extra.deepseekUsage = record; // current swipe; legacy fallback
             const p = priceFor(usage.model);
-            sessionStats.requests++;
-            sessionStats.hit += usage.prompt_cache_hit_tokens;
-            sessionStats.miss += usage.prompt_cache_miss_tokens;
-            sessionStats.saved += usage.prompt_cache_hit_tokens * (p.cache_miss - p.cache_hit) / 1_000_000;
+            if (p) {
+                sessionStats.requests++;
+                sessionStats.hit += usage.prompt_cache_hit_tokens;
+                sessionStats.miss += usage.prompt_cache_miss_tokens;
+                sessionStats.saved += usage.prompt_cache_hit_tokens * (p.cache_miss - p.cache_hit) / 1_000_000;
+            }
             context.saveChat?.();
             render(lastId);
             renderChatTotals();
