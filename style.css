@@ -18,9 +18,10 @@
 .dsum-popup-prices th { opacity: .7; font-weight: normal; }
 .dsum-ok { color: var(--SmartThemeGoodColor, #6fbf73); }
 .dsum-bad { color: var(--SmartThemeDangerColor, #f04747); font-weight: bold; }
-.dsum-mes-stats { display:block; width:100%; max-width:60px; height:auto; opacity:.7; color:inherit; font-family:inherit; }
-.dsum-mes-stats text { font-size: calc(var(--mainFontSize) * 0.95); font-weight:600; fill:currentColor; }
+.dsum-mes-stats { display:flex; flex-direction:column; gap:2px; width:100%; max-width:60px; opacity:.7; color:inherit; }
+.dsum-mes-row { display:flex; align-items:center; gap:3px; }
+.dsum-mes-row svg { width:13px; height:13px; fill:currentColor; flex-shrink:0; }
+.dsum-mes-row span { font-size: calc(var(--mainFontSize) * 0.85); font-weight:600; white-space:nowrap; }
 .dsum-msg-cost { display:inline-block; font-size: calc(var(--mainFontSize) * 0.8); font-weight:600; opacity:.65; margin-left:.5em; cursor:default; white-space:nowrap; }
 .dsum-audit { display:flex; flex-direction:column; gap:.3em; }
 .dsum-finding code { display:block; margin:.15em 0 .4em; font-size:.85em; opacity:.85; word-break:break-all; }
-@media (max-width: 600px) { .dsum-mes-stats { max-width:52px; } }

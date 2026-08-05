@@ -229,13 +229,10 @@
         const wrapper = node.querySelector('.mesAvatarWrapper');
         if (wrapper) {
             wrapper.insertAdjacentHTML('beforeend', `
-            <svg class="dsum-mes-stats" viewBox="0 0 60 36" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${title}" title="${title}">
-                <title>${title}</title>
-                <g transform="translate(2.5,3) scale(0.5)">${ICON_UPLOAD}</g>
-                <text x="15" y="14.4">${n((usage.prompt_tokens ?? 0) - (usage.prompt_cache_hit_tokens ?? 0))}</text>
-                <g transform="translate(2.5,22) scale(0.0166667)">${ICON_DATABASE}</g>
-                <text x="15" y="32.4">${n(usage.prompt_cache_hit_tokens)}</text>
-            </svg>`);
+            <div class="dsum-mes-stats" role="img" aria-label="${title}" title="${title}">
+                <div class="dsum-mes-row"><svg viewBox="0 0 24 24">${ICON_UPLOAD}</svg><span>${n((usage.prompt_tokens ?? 0) - (usage.prompt_cache_hit_tokens ?? 0))}</span></div>
+                <div class="dsum-mes-row"><svg viewBox="0 0 600 500">${ICON_DATABASE}</svg><span>${n(usage.prompt_cache_hit_tokens)}</span></div>
+            </div>`);
         }
         // Cost sits in the message header next to the model icon (timestamp-icon),
         // away from ST's absolutely-positioned swipe counter at the bottom-right.
