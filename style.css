@@ -1,0 +1,26 @@
+#dsum-settings label { display:block; margin: .45em 0; }
+#dsum-settings small { display:block; opacity:.7; margin-top:.6em; }
+.dsum-pricing { margin:.5em 0; font-size:.85em; }
+.dsum-status { font-weight:bold; margin-bottom:.3em; }
+.dsum-status:empty { display:none; }
+.dsum-model { display:flex; justify-content:space-between; gap:.6em; opacity:.85; }
+.dsum-model span { text-align:right; }
+.dsum-actions { display:flex; align-items:center; gap:.6em; margin-top:.5em; }
+#dsum-balance { font-size:.85em; opacity:.8; }
+.dsum-total { margin:.4em 0; font-size:.85em; }
+.dsum-hint { margin:.5em 0; padding:.4em .6em; border:1px solid var(--SmartThemeBorderColor); border-radius:.5em; font-size:.85em; opacity:.85; }
+.dsum-hint code { user-select:all; word-break:break-all; }
+.dsum-popup { min-width: 320px; }
+.dsum-popup h3 { margin-top: 0; }
+.dsum-popup-row { margin: .4em 0; }
+.dsum-popup-prices { width: 100%; border-collapse: collapse; margin: .6em 0; font-size: .9em; }
+.dsum-popup-prices th, .dsum-popup-prices td { border: 1px solid var(--SmartThemeBorderColor); padding: .25em .5em; text-align: left; }
+.dsum-popup-prices th { opacity: .7; font-weight: normal; }
+.dsum-ok { color: var(--SmartThemeGoodColor, #6fbf73); }
+.dsum-bad { color: var(--SmartThemeDangerColor, #f04747); font-weight: bold; }
+.dsum-mes-stats { display:block; width:100%; max-width:60px; height:auto; opacity:.7; color:inherit; font-family:inherit; }
+.dsum-mes-stats text { font-size: calc(var(--mainFontSize) * 0.95); font-weight:600; fill:currentColor; }
+.dsum-msg-cost { display:inline-block; font-size: calc(var(--mainFontSize) * 0.8); font-weight:600; opacity:.65; margin-left:.5em; cursor:default; white-space:nowrap; }
+.dsum-audit { display:flex; flex-direction:column; gap:.3em; }
+.dsum-finding code { display:block; margin:.15em 0 .4em; font-size:.85em; opacity:.85; word-break:break-all; }
+@media (max-width: 600px) { .dsum-mes-stats { max-width:52px; } }

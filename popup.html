@@ -1,0 +1,23 @@
+<div class="dsum-popup">
+    <h3 data-i18n="DeepSeek Usage">DeepSeek Usage</h3>
+    <div class="dsum-popup-row">
+        <b>Balance:</b> {{balanceText}}
+        <span class="dsum-{{#if isAvailable}}ok{{else}}bad{{/if}}">{{#if isAvailable}}available{{else}}insufficient{{/if}}</span>
+    </div>
+    <div class="dsum-popup-row dsum-status">{{peakText}}</div>
+    <table class="dsum-popup-prices">
+        <thead><tr><th>Model</th><th>Input /1M</th><th>Cached /1M</th><th>Output /1M</th></tr></thead>
+        <tbody>
+        {{#each priceRows}}
+        <tr><td>{{model}}</td><td>${{cacheMiss}}</td><td>${{cacheHit}}</td><td>${{output}}</td></tr>
+        {{/each}}
+        </tbody>
+    </table>
+    <div class="dsum-popup-row">This chat: <b>{{chatCost}}</b> · {{chatTokens}} tokens</div>
+    <div class="dsum-popup-row">Cache this session: <b>{{sessionText}}</b></div>
+    <div class="dsum-popup-row dsum-audit"><b>Prompt audit:</b>
+        {{#if auditHtml}}{{{auditHtml}}}{{else}}<span class="dsum-ok">no volatile macros in the prompt head</span>{{/if}}
+        <small>Only the system prompt, lorebook, and character card are scanned — they re-expand on every request and can break the cached prefix.</small>
+    </div>
+    <small>Prices fetched from deepseek.com · source: {{source}}{{#if fetchedAt}} · updated {{fetchedAt}}{{/if}}</small>
+</div>
