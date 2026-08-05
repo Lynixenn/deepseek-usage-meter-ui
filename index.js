@@ -352,7 +352,7 @@
             return { model, cacheHit: e.cache_hit, cacheMiss: e.cache_miss, output: e.output };
         });
         const totals = chatTotals();
-        const html = await renderExtensionTemplateAsync('third-party/ui-extension', 'popup', {
+        const html = await renderExtensionTemplateAsync('third-party/deepseek-usage-meter-ui', 'popup', {
             balanceText: balanceText(),
             isAvailable: balance.isAvailable,
             peakText: pricing.peak

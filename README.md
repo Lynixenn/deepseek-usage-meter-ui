@@ -7,10 +7,10 @@ Shows DeepSeek usage in SillyTavern: tokens and cost per message, cached vs fres
 From inside your SillyTavern folder:
 
 ```
-git clone https://github.com/Lynixenn/deepseek-usage-meter-plugin plugins/deepseek-usage-meter && git clone https://github.com/Lynixenn/deepseek-usage-meter-extension data/default-user/extensions/ui-extension
+git clone https://github.com/Lynixenn/deepseek-usage-meter-server plugins/deepseek-usage-meter-server && git clone https://github.com/Lynixenn/deepseek-usage-meter-ui data/default-user/extensions/deepseek-usage-meter-ui
 ```
 
-Restart the server and refresh the page. If your profile isn't `default-user`, copy the extension to `data/<profile>/extensions/ui-extension` instead.
+Restart the server and refresh the page. If your profile isn't `default-user`, copy the extension to `data/<profile>/extensions/deepseek-usage-meter-ui` instead.
 
 ## Usage
 
