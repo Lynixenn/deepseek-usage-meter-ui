@@ -56,20 +56,27 @@
 .dsum-finding code { display: block; margin: .15em 0 .2em; font-size: .85em; opacity: .85; word-break: break-all; }
 
 /* ===== Message avatar-column stats (position: under .tokenCounterDisplay in .mesAvatarWrapper) ===== */
-.dsum-mes-stats { display: flex; flex-direction: column; gap: 2px; width: 100%; max-width: 60px; opacity: .7; color: inherit; cursor: pointer; transition: opacity .15s ease; }
-.dsum-mes-stats:hover { opacity: 1; }
+.dsum-mes-stats { display: flex; flex-direction: column; gap: 2px; width: 100%; max-width: 60px; opacity: .7; color: inherit; cursor: pointer; }
 .dsum-mes-row { display: flex; align-items: center; gap: 3px; }
 .dsum-mes-row svg { width: 13px; height: 13px; fill: currentColor; flex-shrink: 0; }
 .dsum-mes-row span { font-size: calc(var(--mainFontSize) * 0.85); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* ===== Message header cost (position: next to .timestamp-icon in .ch_name) ===== */
-.dsum-msg-cost { display: inline-block; font-size: calc(var(--mainFontSize) * 0.8); font-weight: 600; opacity: .65; margin-left: .5em; cursor: pointer; white-space: nowrap; padding: .05em .35em; border-radius: .35em; transition: opacity .15s ease, background .15s ease; }
-.dsum-msg-cost:hover { opacity: 1; background: color-mix(in srgb, var(--SmartThemeBorderColor) 25%, transparent); }
+.dsum-msg-cost { display: inline-block; font-size: calc(var(--mainFontSize) * 0.8); font-weight: 600; opacity: .65; margin-left: .5em; cursor: pointer; white-space: nowrap; padding: .05em .35em; border-radius: .35em; }
 .dsum-msg-cost.dsum-peak-cost { color: var(--SmartThemeDangerColor, #f04747); opacity: .9; }
 
-/* ===== Wand menu button (position: inside #extensionsMenu) ===== */
-#dsum_wand_dot { width: 9px; height: 9px; border-radius: 50%; margin-left: auto; flex-shrink: 0; align-self: center; transition: background .3s ease, box-shadow .3s ease; }
-.dsum-wand-dot.dsum-wand-off { background: var(--SmartThemeGoodColor, #6fbf73); box-shadow: 0 0 6px color-mix(in srgb, var(--SmartThemeGoodColor, #6fbf73) 60%, transparent); }
-.dsum-wand-dot.dsum-wand-peak { background: var(--SmartThemeDangerColor, #f04747); box-shadow: 0 0 8px color-mix(in srgb, var(--SmartThemeDangerColor, #f04747) 70%, transparent); animation: dsum-pulse 1.6s ease-in-out infinite; }
-.dsum-wand-dot.dsum-wand-unknown { background: color-mix(in srgb, var(--SmartThemeBorderColor) 60%, transparent); }
-@keyframes dsum-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+/* ===== Wand menu button (position: inside #extensionsMenu) — made larger ===== */
+#extensionsMenu #dsum_wand_button { padding: 8px 12px; font-size: calc(var(--mainFontSize) * 1.25); }
+#extensionsMenu #dsum_wand_button .extensionsMenuExtensionButton { height: 22px; width: 22px; font-size: calc(var(--mainFontSize) * 1.25); }
+
+/* ===== Mobile (ST switches to its mobile layout below 768px) ===== */
+@media (max-width: 768px) {
+    .dsum-popup { min-width: 0; width: 100%; }
+    .dsum-cards { grid-template-columns: 1fr; }
+    .dsum-timeline { gap: 1px; }
+    .dsum-hour { height: 8px; }
+    .dsum-mes-stats { max-width: 48px; }
+    .dsum-msg-cost { font-size: calc(var(--mainFontSize) * 0.75); margin-left: .3em; }
+    #extensionsMenu #dsum_wand_button { padding: 6px 10px; font-size: calc(var(--mainFontSize) * 1.1); }
+    #extensionsMenu #dsum_wand_button .extensionsMenuExtensionButton { height: 20px; width: 20px; font-size: calc(var(--mainFontSize) * 1.1); }
+}

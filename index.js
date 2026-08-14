@@ -359,10 +359,6 @@
     }
 
     function updateWand() {
-        const dot = document.querySelector('#dsum_wand_dot');
-        if (dot) {
-            dot.className = 'dsum-wand-dot' + (pricing.peak ? ' dsum-wand-peak' : pricing.source === 'fallback' ? ' dsum-wand-unknown' : ' dsum-wand-off');
-        }
         const btn = document.querySelector('#dsum_wand_button');
         if (btn) btn.title = `DeepSeek usage & balance — ${balanceText()}${pricing.peak ? ` · PEAK ×${pricing.peakMultiplier}` : ''}`;
     }
@@ -427,7 +423,6 @@
             <div id="dsum_wand_button" class="list-group-item flex-container flexGap5 interactable" title="DeepSeek usage & balance">
                 <div class="fa-solid fa-coins extensionsMenuExtensionButton"></div>
                 <span>DeepSeek Usage</span>
-                <span id="dsum_wand_dot" class="dsum-wand-dot dsum-wand-unknown" title="Peak status: green = off-peak, red = peak pricing, grey = unknown"></span>
             </div>`;
         menu.appendChild(container);
         container.querySelector('#dsum_wand_button').addEventListener('click', openUsagePopup);
