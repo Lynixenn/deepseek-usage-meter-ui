@@ -5,7 +5,7 @@
     };
 
     const context = SillyTavern.getContext();
-    const { eventSource, event_types, extensionSettings, SlashCommand, SlashCommandParser, renderExtensionTemplateAsync, callGenericPopup, POPUP_TYPE } = context;
+    const { eventSource, event_types, extensionSettings, SlashCommand, SlashCommandParser, renderExtensionTemplateAsync, Popup, POPUP_TYPE } = context;
     extensionSettings[KEY] = { ...defaults, ...(extensionSettings[KEY] ?? {}) };
     const settings = extensionSettings[KEY];
 
@@ -385,14 +385,16 @@
         renderPricing();
     }
 
-    async function openUsagePopup() {
-        await Promise.all([fetchPricing(), refreshBalance()]);
+    // Renders the popup HTML from the currently cached pricing/balance state.
+    // No network calls here — the data was refreshed on a timer and after each
+    // generation, so the popup can appear instantly.
+    async function buildPopupHtml() {
         const priceRows = Object.entries(pricing.models).map(([model, p]) => {
             const e = pricing.effective[model] ?? p;
             return { model, cacheHit: priceMoney(e.cache_hit), cacheMiss: priceMoney(e.cache_miss), output: priceMoney(e.output), current: model === lastModel };
         });
         const totals = chatTotals();
-        const html = await renderExtensionTemplateAsync('third-party/deepseek-usage-meter-ui', 'popup', {
+        return renderExtensionTemplateAsync('third-party/deepseek-usage-meter-ui', 'popup', {
             balanceText: balanceText(),
             isAvailable: balance.isAvailable,
             peak: pricing.peak,
@@ -409,7 +411,19 @@
             source: pricing.source,
             fetchedAt: pricing.fetchedAt ? new Date(pricing.fetchedAt).toLocaleTimeString() : '',
         });
-        callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true });
+    }
+
+    async function openUsagePopup() {
+        // Show the popup right away from cached data; refresh prices and balance
+        // in the background and update the open popup in place when they land.
+        const popup = new Popup(await buildPopupHtml(), POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true });
+        const shown = popup.show();
+        Promise.all([fetchPricing(), refreshBalance()])
+            .then(async () => {
+                if (popup.dlg?.open) popup.content.innerHTML = await buildPopupHtml();
+            })
+            .catch(error => console.debug('[DeepSeek Usage Meter]', error.message));
+        return shown;
     }
 
     function addWandButton() {
