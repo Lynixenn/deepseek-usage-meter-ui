@@ -5,7 +5,7 @@
     };
 
     const context = SillyTavern.getContext();
-    const { eventSource, event_types, extensionSettings, SlashCommand, SlashCommandParser, renderExtensionTemplateAsync, Popup, POPUP_TYPE } = context;
+    const { eventSource, event_types, extensionSettings, SlashCommand, SlashCommandParser, renderExtensionTemplateAsync, Popup, POPUP_TYPE, POPUP_RESULT, callGenericPopup, stopGeneration } = context;
     extensionSettings[KEY] = { ...defaults, ...(extensionSettings[KEY] ?? {}) };
     const settings = extensionSettings[KEY];
 
@@ -26,6 +26,9 @@
 
     // Model of the most recent captured message, highlighted in the price table.
     let lastModel = '';
+
+    // Once-per-page-load peak pricing confirm; resets whenever SillyTavern is refreshed.
+    let peakWarned = false;
 
     // Usage captured by intercepting ST's own chat-completions generate response.
     const GENERATE_URL = '/api/backends/chat-completions/generate';
@@ -224,7 +227,7 @@
         const findings = auditPrompt();
         if (!findings.length) return '';
         return findings.map(f =>
-            `<div class="dsum-finding"><span class="dsum-bad">${f.label} ×${f.count}</span> — ${escapeHtml(f.location)}<code>${f.snippet}</code></div>`,
+            `<div class="dsum-finding"><span class="dsum-bad">${f.label} ×${f.count}</span> - ${escapeHtml(f.location)}<code>${f.snippet}</code></div>`,
         ).join('');
     };
 
@@ -238,13 +241,13 @@
         const value = usage.calculated_cost_usd ?? cost(usage);
         const peak = usage.peak ? usage.peakMultiplier ?? pricing.peakMultiplier : null;
         const hitTotal = (usage.prompt_cache_hit_tokens ?? 0) + (usage.prompt_cache_miss_tokens ?? 0);
-        const hitPct = hitTotal ? `${Math.round((usage.prompt_cache_hit_tokens / hitTotal) * 100)}%` : '—';
+        const hitPct = hitTotal ? `${Math.round((usage.prompt_cache_hit_tokens / hitTotal) * 100)}%` : '-';
         const title = [
             `Model ${usage.model || 'unknown'}`,
             `In ${n((usage.prompt_tokens ?? 0) - (usage.prompt_cache_hit_tokens ?? 0))} · Cached ${n(usage.prompt_cache_hit_tokens)} · Miss ${n(usage.prompt_cache_miss_tokens)}`,
             `Out ${n(usage.completion_tokens)} · Total ${n(usage.total_tokens)} · Hit ${hitPct}`,
             `Cost ${costText(value)} · Balance ${balanceText()}`,
-            peak ? `Peak ×${peak} — click for details` : 'Click for details',
+            peak ? `Peak ×${peak} - click for details` : 'Click for details',
         ].join('\n');
         // Avatar column, right under the core token counter (.tokenCounterDisplay).
         const wrapper = node.querySelector('.mesAvatarWrapper');
@@ -336,7 +339,7 @@
         const node = document.querySelector('#dsum-pricing');
         if (!node) return;
         const status = pricing.peak
-            ? `Peak pricing active — prices ×${pricing.peakMultiplier} (Beijing ${pricing.beijingTime})`
+            ? `Peak pricing active - prices ×${pricing.peakMultiplier} (Beijing ${pricing.beijingTime})`
             : `Off-peak pricing (Beijing ${pricing.beijingTime})`;
         const schedule = (pricing.peakHours ?? []).map(({ start, end }) => `${start}–${end}`).join(' · ');
         const rows = Object.entries(pricing.models).map(([model, p]) => {
@@ -360,7 +363,26 @@
 
     function updateWand() {
         const btn = document.querySelector('#dsum_wand_button');
-        if (btn) btn.title = `DeepSeek usage & balance — ${balanceText()}${pricing.peak ? ` · PEAK ×${pricing.peakMultiplier}` : ''}`;
+        if (btn) btn.title = `DeepSeek usage & balance - ${balanceText()}${pricing.peak ? ` · PEAK ×${pricing.peakMultiplier}` : ''}`;
+    }
+
+    // One-time-per-page-load confirm when a generation starts during peak pricing.
+    // Runs without blocking GENERATION_STARTED (the request is already in flight);
+    // "Cancel" aborts it exactly like the Stop button. Resets on every page reload.
+    async function confirmPeakPricing() {
+        if (peakWarned) return;
+        // Only warn when the peak state is actually known.
+        if (!pricing.fetchedAt || !pricing.peak) return;
+        peakWarned = true;
+        const confirmed = await callGenericPopup(
+            `<h3>Peak pricing active</h3><p>DeepSeek prices are currently <b>×${pricing.peakMultiplier}</b> during peak hours (Beijing ${pricing.beijingTime}). Continue generating?</p>`,
+            POPUP_TYPE.CONFIRM,
+            '',
+            { okButton: 'Continue', cancelButton: 'Cancel' },
+        );
+        if (confirmed !== POPUP_RESULT.AFFIRMATIVE && typeof stopGeneration === 'function') {
+            stopGeneration();
+        }
     }
 
     function renderChatTotals() {
@@ -386,7 +408,7 @@
     }
 
     // Renders the popup HTML from the currently cached pricing/balance state.
-    // No network calls here — the data was refreshed on a timer and after each
+    // No network calls here - the data was refreshed on a timer and after each
     // generation, so the popup can appear instantly.
     async function buildPopupHtml() {
         const priceRows = Object.entries(pricing.models).map(([model, p]) => {
@@ -466,7 +488,7 @@
             <div class="inline-drawer-content">
               <div class="dsum-statusline">
                 <span id="dsum-peak-state" class="dsum-peak-state dsum-ok">Off-peak</span>
-                <span id="dsum-bj-clock" class="dsum-clock">Beijing —</span>
+                <span id="dsum-bj-clock" class="dsum-clock">Beijing -</span>
               </div>
               <div id="dsum-pricing" class="dsum-pricing"></div>
               <div class="dsum-grid">
@@ -480,7 +502,7 @@
               <label class="dsum-token-row">Meter token (optional)
                 <span class="dsum-token-wrap"><input id="dsum-token" class="text_pole" type="password"><button id="dsum-token-toggle" class="menu_button dsum-token-toggle" type="button" title="Show/hide token"><i class="fa-solid fa-eye"></i></button></span>
               </label>
-              <div class="dsum-hint">Per-message usage (cost, cached/missed tokens) is captured automatically from SillyTavern's chat-completion response. Keep the DeepSeek endpoint on <code>api.deepseek.com</code> — no proxy needed. Click any per-message cost or token stats for the full view.</div>
+              <div class="dsum-hint">Per-message usage (cost, cached/missed tokens) is captured automatically from SillyTavern's chat-completion response. Keep the DeepSeek endpoint on <code>api.deepseek.com</code> - no proxy needed. Click any per-message cost or token stats for the full view.</div>
             </div>
           </div>`);
         const token = document.querySelector('#dsum-token');
@@ -518,6 +540,10 @@
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, render);
     eventSource.on(event_types.MESSAGE_SWIPED, mesId => render(mesId)); // each swipe shows its own usage
     eventSource.on(event_types.GENERATION_ENDED, attachLatestUsage);
+    eventSource.on(event_types.GENERATION_STARTED, (type, options, dryRun) => {
+        if (dryRun) return; // dry runs assemble the prompt without hitting the API
+        confirmPeakPricing();
+    });
     eventSource.on(event_types.CHAT_CHANGED, () => {
         context.chat.forEach((_, i) => render(i));
         renderChatTotals();

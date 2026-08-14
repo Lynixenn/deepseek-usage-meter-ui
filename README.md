@@ -18,3 +18,4 @@ Restart the server and refresh the page. If your profile isn't `default-user`, c
 - Hover the numbers on a message for a detailed tooltip, or click the cost/stats to open the full view
 - The popup shows a 24h peak-hour timeline in Beijing time and highlights the model currently in use
 - The popup also warns about macros in your system prompt or lorebook that would break DeepSeek's prefix caching ({{time}}, {{random}}, etc.)
+- The first generation during peak hours (prices ×2) asks once per page load whether to continue; refresh SillyTavern to be asked again

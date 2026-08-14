@@ -70,7 +70,7 @@
 .dsum-msg-cost { display: inline-block; font-size: calc(var(--mainFontSize) * 0.8); font-weight: 600; opacity: .65; margin-left: .5em; cursor: pointer; white-space: nowrap; padding: .05em .35em; border-radius: .35em; }
 .dsum-msg-cost.dsum-peak-cost { color: var(--SmartThemeDangerColor, #f04747); opacity: .9; }
 
-/* ===== Wand menu button (position: inside #extensionsMenu) — made larger ===== */
+/* ===== Wand menu button (position: inside #extensionsMenu) - made larger ===== */
 #extensionsMenu #dsum_wand_button { padding: 8px 12px; font-size: calc(var(--mainFontSize) * 1.25); }
 #extensionsMenu #dsum_wand_button .extensionsMenuExtensionButton { height: 22px; width: 22px; font-size: calc(var(--mainFontSize) * 1.25); }
 
