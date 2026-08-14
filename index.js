@@ -24,6 +24,9 @@
     // Balance state from the plugin's live /balance endpoint.
     let balance = { infos: [], isAvailable: true };
 
+    // Model of the most recent captured message, highlighted in the price table.
+    let lastModel = '';
+
     // Usage captured by intercepting ST's own chat-completions generate response.
     const GENERATE_URL = '/api/backends/chat-completions/generate';
     const capturedQueue = [];
@@ -112,6 +115,18 @@
 
     const n = value => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value ?? 0));
     const money = value => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 5 }).format(Number(value ?? 0));
+    const priceMoney = value => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(Number(value ?? 0));
+    const hmToMin = s => { const [h, m] = String(s).split(':').map(Number); return h * 60 + (m || 0); };
+    const beijingMinutesNow = () => Math.floor(((Date.now() + 8 * 3600000) % 86400000) / 60000);
+    const beijingTimeNow = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' });
+    function buildTimeline(peakHours, nowMinutes) {
+        const windows = (peakHours ?? []).map(({ start, end }) => ({ start: hmToMin(start), end: hmToMin(end) }));
+        return Array.from({ length: 24 }, (_, h) => {
+            const start = h * 60, end = start + 60;
+            const peak = windows.some(({ start: s, end: e }) => s <= e ? start < e && end > s : start < e || end > s);
+            return { label: String(h).padStart(2, '0'), peak, now: nowMinutes >= start && nowMinutes < end };
+        });
+    }
     const headers = () => settings.meterToken ? { 'x-meter-token': settings.meterToken } : {};
     const meterUrl = path => `/api/plugins/deepseek-usage-meter${path}`;
     const balanceText = () => balance.infos.map(x => `${x.currency} ${x.total_balance}`).join(' · ') || 'No balance';
@@ -224,7 +239,13 @@
         const peak = usage.peak ? usage.peakMultiplier ?? pricing.peakMultiplier : null;
         const hitTotal = (usage.prompt_cache_hit_tokens ?? 0) + (usage.prompt_cache_miss_tokens ?? 0);
         const hitPct = hitTotal ? `${Math.round((usage.prompt_cache_hit_tokens / hitTotal) * 100)}%` : '—';
-        const title = `Model ${usage.model || 'unknown'} · In ${n((usage.prompt_tokens ?? 0) - (usage.prompt_cache_hit_tokens ?? 0))} · Cached ${n(usage.prompt_cache_hit_tokens)} · Miss ${n(usage.prompt_cache_miss_tokens)} · Out ${n(usage.completion_tokens)} · Total ${n(usage.total_tokens)} · Hit ${hitPct} · Balance ${balanceText()}${peak ? ` · Peak ×${peak}` : ''}`;
+        const title = [
+            `Model ${usage.model || 'unknown'}`,
+            `In ${n((usage.prompt_tokens ?? 0) - (usage.prompt_cache_hit_tokens ?? 0))} · Cached ${n(usage.prompt_cache_hit_tokens)} · Miss ${n(usage.prompt_cache_miss_tokens)}`,
+            `Out ${n(usage.completion_tokens)} · Total ${n(usage.total_tokens)} · Hit ${hitPct}`,
+            `Cost ${costText(value)} · Balance ${balanceText()}`,
+            peak ? `Peak ×${peak} — click for details` : 'Click for details',
+        ].join('\n');
         // Avatar column, right under the core token counter (.tokenCounterDisplay).
         const wrapper = node.querySelector('.mesAvatarWrapper');
         if (wrapper) {
@@ -233,13 +254,15 @@
                 <div class="dsum-mes-row"><svg viewBox="0 0 24 24">${ICON_UPLOAD}</svg><span>${n((usage.prompt_tokens ?? 0) - (usage.prompt_cache_hit_tokens ?? 0))}</span></div>
                 <div class="dsum-mes-row"><svg viewBox="0 0 24 24">${ICON_CACHE}</svg><span>${n(usage.prompt_cache_hit_tokens)}</span></div>
             </div>`);
+            node.querySelector('.dsum-mes-stats').addEventListener('click', event => { event.stopPropagation(); openUsagePopup(); });
         }
         // Cost sits in the message header next to the model icon (timestamp-icon),
         // away from ST's absolutely-positioned swipe counter at the bottom-right.
         const modelIcon = node.querySelector('.ch_name .timestamp-icon');
         const headerAnchor = modelIcon || node.querySelector('.ch_name .timestamp') || node.querySelector('.ch_name .name_text');
         if (headerAnchor) {
-            headerAnchor.insertAdjacentHTML('afterend', `<span class="dsum-msg-cost" title="${title}">${costText(value)}${peak ? ` · PEAK ×${peak}` : ''}</span>`);
+            headerAnchor.insertAdjacentHTML('afterend', `<span class="dsum-msg-cost${peak ? ' dsum-peak-cost' : ''}" title="${title}">${costText(value)}${peak ? ` · PEAK ×${peak}` : ''}</span>`);
+            node.querySelector('.dsum-msg-cost').addEventListener('click', event => { event.stopPropagation(); openUsagePopup(); });
         }
     }
 
@@ -293,13 +316,20 @@
             const body = await response.json();
             balance = { infos: body.balance_infos ?? [], isAvailable: body.is_available !== false };
             const output = document.querySelector('#dsum-balance');
-            if (output) output.textContent = balanceText();
+            if (output) {
+                output.textContent = balanceText();
+                output.classList.toggle('dsum-bad', !balance.isAvailable);
+            }
         } catch (error) {
             balance = { infos: [], isAvailable: false };
             const output = document.querySelector('#dsum-balance');
-            if (output) output.textContent = 'Balance unavailable';
+            if (output) {
+                output.textContent = 'Balance unavailable';
+                output.classList.add('dsum-bad');
+            }
             console.debug('[DeepSeek Usage Meter]', error.message);
         }
+        updateWand();
     }
 
     function renderPricing() {
@@ -308,11 +338,33 @@
         const status = pricing.peak
             ? `Peak pricing active — prices ×${pricing.peakMultiplier} (Beijing ${pricing.beijingTime})`
             : `Off-peak pricing (Beijing ${pricing.beijingTime})`;
+        const schedule = (pricing.peakHours ?? []).map(({ start, end }) => `${start}–${end}`).join(' · ');
         const rows = Object.entries(pricing.models).map(([model, p]) => {
             const e = pricing.effective[model] ?? p;
-            return `<div class="dsum-model"><b>${model}</b><span>in ${money(e.cache_miss)}/1M · cached ${money(e.cache_hit)}/1M · out ${money(e.output)}/1M</span></div>`;
+            return `<div class="dsum-model"><b>${model}</b><span>in ${priceMoney(e.cache_miss)}/1M · cached ${priceMoney(e.cache_hit)}/1M · out ${priceMoney(e.output)}/1M</span></div>`;
         }).join('');
-        node.innerHTML = `<div class="dsum-status">${status}</div>${rows}<small>Prices fetched from deepseek.com · source: ${pricing.source}${pricing.fetchedAt ? ` · ${new Date(pricing.fetchedAt).toLocaleTimeString()}` : ''}</small>`;
+        node.innerHTML = `<div class="dsum-status">${status}</div>${schedule ? `<div class="dsum-schedule">Peak hours (Beijing): ${schedule}</div>` : ''}${rows}<small>Prices fetched from deepseek.com · source: ${pricing.source}${pricing.fetchedAt ? ` · ${new Date(pricing.fetchedAt).toLocaleTimeString()}` : ''}</small>`;
+        updateStatusline();
+        updateWand();
+    }
+
+    function updateStatusline() {
+        const state = document.querySelector('#dsum-peak-state');
+        if (state) {
+            state.textContent = pricing.peak ? `Peak ×${pricing.peakMultiplier}` : 'Off-peak';
+            state.className = `dsum-peak-state ${pricing.peak ? 'dsum-bad' : 'dsum-ok'}`;
+        }
+        const clock = document.querySelector('#dsum-bj-clock');
+        if (clock) clock.textContent = `Beijing ${beijingTimeNow()}`;
+    }
+
+    function updateWand() {
+        const dot = document.querySelector('#dsum_wand_dot');
+        if (dot) {
+            dot.className = 'dsum-wand-dot' + (pricing.peak ? ' dsum-wand-peak' : pricing.source === 'fallback' ? ' dsum-wand-unknown' : ' dsum-wand-off');
+        }
+        const btn = document.querySelector('#dsum_wand_button');
+        if (btn) btn.title = `DeepSeek usage & balance — ${balanceText()}${pricing.peak ? ` · PEAK ×${pricing.peakMultiplier}` : ''}`;
     }
 
     function renderChatTotals() {
@@ -341,15 +393,18 @@
         await Promise.all([fetchPricing(), refreshBalance()]);
         const priceRows = Object.entries(pricing.models).map(([model, p]) => {
             const e = pricing.effective[model] ?? p;
-            return { model, cacheHit: e.cache_hit, cacheMiss: e.cache_miss, output: e.output };
+            return { model, cacheHit: priceMoney(e.cache_hit), cacheMiss: priceMoney(e.cache_miss), output: priceMoney(e.output), current: model === lastModel };
         });
         const totals = chatTotals();
         const html = await renderExtensionTemplateAsync('third-party/deepseek-usage-meter-ui', 'popup', {
             balanceText: balanceText(),
             isAvailable: balance.isAvailable,
+            peak: pricing.peak,
             peakText: pricing.peak
-                ? `Peak pricing active — prices ×${pricing.peakMultiplier} (Beijing ${pricing.beijingTime})`
-                : `Off-peak pricing (Beijing ${pricing.beijingTime})`,
+                ? `Peak pricing ×${pricing.peakMultiplier}`
+                : 'Off-peak pricing',
+            beijingTime: beijingTimeNow(),
+            timeline: buildTimeline(pricing.peakHours, beijingMinutesNow()),
             priceRows,
             chatCost: money(totals.cost),
             chatTokens: n(totals.tokens),
@@ -372,6 +427,7 @@
             <div id="dsum_wand_button" class="list-group-item flex-container flexGap5 interactable" title="DeepSeek usage & balance">
                 <div class="fa-solid fa-coins extensionsMenuExtensionButton"></div>
                 <span>DeepSeek Usage</span>
+                <span id="dsum_wand_dot" class="dsum-wand-dot dsum-wand-unknown" title="Peak status: green = off-peak, red = peak pricing, grey = unknown"></span>
             </div>`;
         menu.appendChild(container);
         container.querySelector('#dsum_wand_button').addEventListener('click', openUsagePopup);
@@ -382,12 +438,23 @@
           <div id="dsum-settings" class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header"><b>DeepSeek Usage Meter</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
             <div class="inline-drawer-content">
-              <label>Meter token (optional) <input id="dsum-token" class="text_pole" type="password"></label>
-              <div class="dsum-hint">Per-message usage (cost, cached/missed tokens) is captured automatically from SillyTavern's chat-completion response. Keep the DeepSeek endpoint on <code>api.deepseek.com</code> — no proxy needed.</div>
+              <div class="dsum-statusline">
+                <span id="dsum-peak-state" class="dsum-peak-state dsum-ok">Off-peak</span>
+                <span id="dsum-bj-clock" class="dsum-clock">Beijing —</span>
+              </div>
               <div id="dsum-pricing" class="dsum-pricing"></div>
-              <div class="dsum-total">This chat: <b id="dsum-chat-total"></b></div>
-              <div class="dsum-total">Cache session: <b id="dsum-session"></b></div>
-              <div class="dsum-actions"><button id="dsum-refresh" class="menu_button">Refresh balance &amp; prices</button><span id="dsum-balance"></span></div>
+              <div class="dsum-grid">
+                <div class="dsum-total">This chat: <b id="dsum-chat-total"></b></div>
+                <div class="dsum-total">Cache session: <b id="dsum-session"></b></div>
+              </div>
+              <div class="dsum-actions">
+                <button id="dsum-refresh" class="menu_button"><i class="fa-solid fa-rotate"></i> Refresh balance &amp; prices</button>
+                <span id="dsum-balance" class="dsum-balance"></span>
+              </div>
+              <label class="dsum-token-row">Meter token (optional)
+                <span class="dsum-token-wrap"><input id="dsum-token" class="text_pole" type="password"><button id="dsum-token-toggle" class="menu_button dsum-token-toggle" type="button" title="Show/hide token"><i class="fa-solid fa-eye"></i></button></span>
+              </label>
+              <div class="dsum-hint">Per-message usage (cost, cached/missed tokens) is captured automatically from SillyTavern's chat-completion response. Keep the DeepSeek endpoint on <code>api.deepseek.com</code> — no proxy needed. Click any per-message cost or token stats for the full view.</div>
             </div>
           </div>`);
         const token = document.querySelector('#dsum-token');
@@ -395,6 +462,12 @@
         token.addEventListener('input', () => {
             settings.meterToken = token.value;
             context.saveSettingsDebounced();
+        });
+        const toggle = document.querySelector('#dsum-token-toggle');
+        toggle.addEventListener('click', () => {
+            const show = token.type === 'password';
+            token.type = show ? 'text' : 'password';
+            toggle.querySelector('i').className = show ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
         });
         document.querySelector('#dsum-refresh').addEventListener('click', () => { refreshBalance(); fetchPricing(); });
     }
@@ -413,6 +486,8 @@
     refreshBalance();
     renderChatTotals();
     setInterval(fetchPricing, 10 * 60 * 1000); // keep peak-hour detection current across session
+    setInterval(() => { refreshBalance(); updateStatusline(); }, 10 * 60 * 1000); // keep balance + Beijing clock fresh
+    setInterval(updateStatusline, 30 * 1000); // Beijing clock tick
     eventSource.on(event_types.APP_READY, addWandButton); // auto-fires if the app is already ready
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, render);
     eventSource.on(event_types.MESSAGE_SWIPED, mesId => render(mesId)); // each swipe shows its own usage

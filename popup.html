@@ -1,23 +1,42 @@
 <div class="dsum-popup">
     <h3 data-i18n="DeepSeek Usage">DeepSeek Usage</h3>
-    <div class="dsum-popup-row">
-        <b>Balance:</b> {{balanceText}}
-        <span class="dsum-{{#if isAvailable}}ok{{else}}bad{{/if}}">{{#if isAvailable}}available{{else}}insufficient{{/if}}</span>
+    <div class="dsum-popup-head">
+        <span class="dsum-pill dsum-{{#if peak}}bad{{else}}ok{{/if}}">{{peakText}}</span>
+        <span class="dsum-clock">Beijing <b>{{beijingTime}}</b></span>
     </div>
-    <div class="dsum-popup-row dsum-status">{{peakText}}</div>
+    <div class="dsum-cards">
+        <div class="dsum-card">
+            <span class="dsum-card-label">Balance</span>
+            <span class="dsum-card-value">{{balanceText}}</span>
+            <span class="dsum-pill dsum-{{#if isAvailable}}ok{{else}}bad{{/if}}">{{#if isAvailable}}available{{else}}insufficient{{/if}}</span>
+        </div>
+        <div class="dsum-card">
+            <span class="dsum-card-label">This chat</span>
+            <span class="dsum-card-value">{{chatCost}}</span>
+            <span class="dsum-card-sub">{{chatTokens}} tokens</span>
+        </div>
+        <div class="dsum-card dsum-card-wide">
+            <span class="dsum-card-label">Cache this session</span>
+            <span class="dsum-card-sub">{{sessionText}}</span>
+        </div>
+    </div>
+    <div class="dsum-timeline" role="img" aria-label="Peak hours timeline (Beijing time)">
+        {{#each timeline}}
+        <div class="dsum-hour{{#if this.peak}} dsum-hour-peak{{/if}}{{#if this.now}} dsum-hour-now{{/if}}" title="{{this.label}}:00{{#if this.peak}} — peak pricing{{/if}}{{#if this.now}} ← now{{/if}}"></div>
+        {{/each}}
+    </div>
+    <div class="dsum-timeline-label">00 · 06 · 12 · 18 · 24 (Beijing time) — <b>peak hours highlighted</b></div>
     <table class="dsum-popup-prices">
         <thead><tr><th>Model</th><th>Input /1M</th><th>Cached /1M</th><th>Output /1M</th></tr></thead>
         <tbody>
         {{#each priceRows}}
-        <tr><td>{{model}}</td><td>${{cacheMiss}}</td><td>${{cacheHit}}</td><td>${{output}}</td></tr>
+        <tr class="{{#if this.current}}dsum-current{{/if}}"><td>{{this.model}}{{#if this.current}} <span class="dsum-now-model">· in use</span>{{/if}}</td><td>{{this.cacheMiss}}</td><td>{{this.cacheHit}}</td><td>{{this.output}}</td></tr>
         {{/each}}
         </tbody>
     </table>
-    <div class="dsum-popup-row">This chat: <b>{{chatCost}}</b> · {{chatTokens}} tokens</div>
-    <div class="dsum-popup-row">Cache this session: <b>{{sessionText}}</b></div>
     <div class="dsum-popup-row dsum-audit"><b>Prompt audit:</b>
         {{#if auditHtml}}{{{auditHtml}}}{{else}}<span class="dsum-ok">no volatile macros in the prompt head</span>{{/if}}
         <small>Only the system prompt, lorebook, and character card are scanned — they re-expand on every request and can break the cached prefix.</small>
     </div>
-    <small>Prices fetched from deepseek.com · source: {{source}}{{#if fetchedAt}} · updated {{fetchedAt}}{{/if}}</small>
+    <div class="dsum-popup-foot"><small>Prices fetched from deepseek.com · source: {{source}}{{#if fetchedAt}} · updated {{fetchedAt}}{{/if}}</small></div>
 </div>

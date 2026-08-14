@@ -15,5 +15,7 @@ Restart the server and refresh the page. If your profile isn't `default-user`, c
 ## Usage
 
 - `/dsum` or the "DeepSeek Usage" wand button opens the full view (balance, prices, peak hours, session stats)
-- Hover the numbers on a message for details
+- The wand button carries a live status dot: green = off-peak, red = peak pricing (pulsing), grey = prices unavailable
+- Hover the numbers on a message for a detailed tooltip, or click the cost/stats to open the full view
+- The popup shows a 24h peak-hour timeline in Beijing time and highlights the model currently in use
 - The popup also warns about macros in your system prompt or lorebook that would break DeepSeek's prefix caching ({{time}}, {{random}}, etc.)
