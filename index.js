@@ -413,16 +413,33 @@
         });
     }
 
+    // Refreshes pricing/balance and, if the popup is still open, re-renders its
+    // content in place (the refresh button inside the popup uses this too).
+    async function refreshPopupContent(popup) {
+        await Promise.all([fetchPricing(), refreshBalance()]);
+        if (popup.dlg?.open) {
+            popup.content.innerHTML = await buildPopupHtml();
+            wirePopupRefresh(popup);
+        }
+    }
+
+    // The popup HTML is sanitized by DOMPurify, so no inline handlers survive;
+    // wire the refresh button explicitly after every render instead.
+    function wirePopupRefresh(popup) {
+        const btn = popup.content.querySelector('#dsum-popup-refresh');
+        if (btn && !btn.dataset.dsumWired) {
+            btn.dataset.dsumWired = '1';
+            btn.addEventListener('click', () => refreshPopupContent(popup));
+        }
+    }
+
     async function openUsagePopup() {
         // Show the popup right away from cached data; refresh prices and balance
         // in the background and update the open popup in place when they land.
         const popup = new Popup(await buildPopupHtml(), POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true });
+        wirePopupRefresh(popup);
         const shown = popup.show();
-        Promise.all([fetchPricing(), refreshBalance()])
-            .then(async () => {
-                if (popup.dlg?.open) popup.content.innerHTML = await buildPopupHtml();
-            })
-            .catch(error => console.debug('[DeepSeek Usage Meter]', error.message));
+        refreshPopupContent(popup).catch(error => console.debug('[DeepSeek Usage Meter]', error.message));
         return shown;
     }
 

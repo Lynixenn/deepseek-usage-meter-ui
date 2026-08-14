@@ -38,5 +38,8 @@
         {{#if auditHtml}}{{{auditHtml}}}{{else}}<span class="dsum-ok">no volatile macros in the prompt head</span>{{/if}}
         <small>Only the system prompt, lorebook, and character card are scanned — they re-expand on every request and can break the cached prefix.</small>
     </div>
+    <div class="dsum-popup-row dsum-popup-actions">
+        <button id="dsum-popup-refresh" class="menu_button"><i class="fa-solid fa-rotate"></i> Refresh balance &amp; prices</button>
+    </div>
     <div class="dsum-popup-foot"><small>Prices fetched from deepseek.com · source: {{source}}{{#if fetchedAt}} · updated {{fetchedAt}}{{/if}}</small></div>
 </div>
