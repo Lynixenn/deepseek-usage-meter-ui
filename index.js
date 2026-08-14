@@ -409,7 +409,7 @@
             source: pricing.source,
             fetchedAt: pricing.fetchedAt ? new Date(pricing.fetchedAt).toLocaleTimeString() : '',
         });
-        callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, large: true });
+        callGenericPopup(html, POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true });
     }
 
     function addWandButton() {

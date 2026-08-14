@@ -16,6 +16,8 @@
 .dsum-total { margin: 0; font-size: .85em; }
 .dsum-total b { font-variant-numeric: tabular-nums; }
 .dsum-actions { display: flex; align-items: center; gap: .6em; margin-top: .5em; flex-wrap: wrap; }
+#dsum-refresh { padding: 7px 14px; font-size: calc(var(--mainFontSize) * 0.95); }
+#dsum-refresh i { margin-right: .4em; }
 #dsum-balance { font-size: .85em; opacity: .8; font-variant-numeric: tabular-nums; }
 #dsum-balance.dsum-bad { color: var(--SmartThemeDangerColor, #f04747); }
 .dsum-token-row { display: flex; flex-direction: column; gap: .3em; font-size: .9em; }
