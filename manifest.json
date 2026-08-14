@@ -7,7 +7,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "Lynixenn",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "homePage": "https://github.com/Lynixenn/deepseek-usage-meter-ui",
   "auto_update": false,
   "minimum_client_version": "1.13.0"

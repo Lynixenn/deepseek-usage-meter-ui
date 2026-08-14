@@ -93,14 +93,31 @@
             const url = typeof input === 'string' ? input : input?.url;
             const isGenerate = typeof url === 'string' && url.includes(GENERATE_URL);
             if (isGenerate && init && typeof init.body === 'string' && (init.method === undefined || init.method === 'POST')) {
-                // DeepSeek only reports usage in streams when asked to.
+                let parsed = null;
                 try {
-                    const parsed = JSON.parse(init.body);
+                    parsed = JSON.parse(init.body);
+                } catch { /* body is not JSON */ }
+                if (parsed) {
+                    // DeepSeek only reports usage in streams when asked to.
                     if (parsed.stream) {
                         parsed.stream_options = { ...(parsed.stream_options || {}), include_usage: true };
                         init = { ...init, body: JSON.stringify(parsed) };
                     }
-                } catch { /* body is not JSON */ }
+                    // Hold the request until the once-per-page-load peak confirm
+                    // is answered; the request is not sent until Continue is clicked.
+                    if (String(parsed.model || '').includes('deepseek')) {
+                        let go = true;
+                        try {
+                            go = await confirmPeakPricing();
+                        } catch (error) {
+                            console.debug('[DeepSeek Usage Meter]', error.message);
+                        }
+                        if (!go) {
+                            cancelPeakGeneration();
+                            throw new Error('Generation cancelled by user (peak pricing)');
+                        }
+                    }
+                }
             }
             const response = await realFetch(input, init);
             if (isGenerate && response.ok) {
@@ -366,13 +383,14 @@
         if (btn) btn.title = `DeepSeek usage & balance - ${balanceText()}${pricing.peak ? ` · PEAK ×${pricing.peakMultiplier}` : ''}`;
     }
 
-    // One-time-per-page-load confirm when a generation starts during peak pricing.
-    // Runs without blocking GENERATION_STARTED (the request is already in flight);
-    // "Cancel" aborts it exactly like the Stop button. Resets on every page reload.
+    // Once-per-page-load confirm when a generation starts during peak pricing.
+    // Called from the fetch patch, which HOLDS the request until the user answers,
+    // so nothing is sent to the server before Continue is clicked. Returns false
+    // when the user cancels and the request must be dropped.
     async function confirmPeakPricing() {
-        if (peakWarned) return;
+        if (peakWarned) return true;
         // Only warn when the peak state is actually known.
-        if (!pricing.fetchedAt || !pricing.peak) return;
+        if (!pricing.fetchedAt || !pricing.peak) return true;
         peakWarned = true;
         const confirmed = await callGenericPopup(
             `<h3>Peak pricing active</h3><p>DeepSeek prices are currently <b>×${pricing.peakMultiplier}</b> during peak hours (Beijing ${pricing.beijingTime}). Continue generating?</p>`,
@@ -380,9 +398,14 @@
             '',
             { okButton: 'Continue', cancelButton: 'Cancel' },
         );
-        if (confirmed !== POPUP_RESULT.AFFIRMATIVE && typeof stopGeneration === 'function') {
-            stopGeneration();
-        }
+        return confirmed === POPUP_RESULT.AFFIRMATIVE;
+    }
+
+    // Cancels a held generation: the request never went out, so abort ST's
+    // in-flight state (same path as the Stop button) and re-enable the UI.
+    function cancelPeakGeneration() {
+        if (typeof stopGeneration === 'function') stopGeneration();
+        if (typeof context.activateSendButtons === 'function') context.activateSendButtons();
     }
 
     function renderChatTotals() {
@@ -540,10 +563,6 @@
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, render);
     eventSource.on(event_types.MESSAGE_SWIPED, mesId => render(mesId)); // each swipe shows its own usage
     eventSource.on(event_types.GENERATION_ENDED, attachLatestUsage);
-    eventSource.on(event_types.GENERATION_STARTED, (type, options, dryRun) => {
-        if (dryRun) return; // dry runs assemble the prompt without hitting the API
-        confirmPeakPricing();
-    });
     eventSource.on(event_types.CHAT_CHANGED, () => {
         context.chat.forEach((_, i) => render(i));
         renderChatTotals();
