@@ -27,6 +27,8 @@
 .dsum-token-wrap { display: flex; gap: .4em; align-items: center; }
 .dsum-token-wrap .text_pole { flex: 1; }
 .dsum-token-toggle { flex-shrink: 0; padding: .3em .7em; }
+.dsum-check-row { display: flex; align-items: center; justify-content: space-between; gap: .6em; font-size: .9em; }
+.dsum-check-row input[type="checkbox"] { width: 1.15em; height: 1.15em; accent-color: var(--SmartThemeGoodColor, #6fbf73); cursor: pointer; flex-shrink: 0; }
 .dsum-hint { margin: .5em 0; padding: .4em .6em; border: 1px solid var(--SmartThemeBorderColor); border-radius: .5em; font-size: .85em; opacity: .85; }
 .dsum-hint code { user-select: all; word-break: break-all; }
 

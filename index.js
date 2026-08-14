@@ -2,6 +2,7 @@
     const KEY = 'deepseekUsageMeter';
     const defaults = {
         meterToken: '',
+        testMode: false,
     };
 
     const context = SillyTavern.getContext();
@@ -387,13 +388,22 @@
     // Called from the fetch patch, which HOLDS the request until the user answers,
     // so nothing is sent to the server before Continue is clicked. Returns false
     // when the user cancels and the request must be dropped.
+    // Test mode: asks on every generation, ignoring peak state and the page-load
+    // gate, so the flow can be tried at any time.
     async function confirmPeakPricing() {
-        if (peakWarned) return true;
-        // Only warn when the peak state is actually known.
-        if (!pricing.fetchedAt || !pricing.peak) return true;
-        peakWarned = true;
+        if (!settings.testMode) {
+            if (peakWarned) return true;
+            // Only warn when the peak state is actually known.
+            if (!pricing.fetchedAt || !pricing.peak) return true;
+            peakWarned = true;
+        }
+        const status = pricing.peak
+            ? `DeepSeek prices are currently <b>×${pricing.peakMultiplier}</b> during peak hours (Beijing ${pricing.beijingTime}).`
+            : 'DeepSeek is currently off-peak.';
+        const title = settings.testMode ? 'Peak confirm (test mode)' : 'Peak pricing active';
+        const note = settings.testMode ? ' Test mode is on, so every generation is held for confirmation.' : '';
         const confirmed = await callGenericPopup(
-            `<h3>Peak pricing active</h3><p>DeepSeek prices are currently <b>×${pricing.peakMultiplier}</b> during peak hours (Beijing ${pricing.beijingTime}). Continue generating?</p>`,
+            `<h3>${title}</h3><p>${status}${note} Continue generating?</p>`,
             POPUP_TYPE.CONFIRM,
             '',
             { okButton: 'Continue', cancelButton: 'Cancel' },
@@ -525,6 +535,10 @@
               <label class="dsum-token-row">Meter token (optional)
                 <span class="dsum-token-wrap"><input id="dsum-token" class="text_pole" type="password"><button id="dsum-token-toggle" class="menu_button dsum-token-toggle" type="button" title="Show/hide token"><i class="fa-solid fa-eye"></i></button></span>
               </label>
+              <label class="dsum-check-row">Peak confirm test mode
+                <input id="dsum-test-mode" type="checkbox">
+              </label>
+              <small>Holds every DeepSeek generation and asks to continue, so you can test the peak confirm outside peak hours.</small>
               <div class="dsum-hint">Per-message usage (cost, cached/missed tokens) is captured automatically from SillyTavern's chat-completion response. Keep the DeepSeek endpoint on <code>api.deepseek.com</code> - no proxy needed. Click any per-message cost or token stats for the full view.</div>
             </div>
           </div>`);
@@ -539,6 +553,13 @@
             const show = token.type === 'password';
             token.type = show ? 'text' : 'password';
             toggle.querySelector('i').className = show ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+        });
+        const testMode = document.querySelector('#dsum-test-mode');
+        testMode.checked = !!settings.testMode;
+        testMode.addEventListener('change', () => {
+            settings.testMode = testMode.checked;
+            if (!settings.testMode) peakWarned = false; // real-mode confirm is fresh again
+            context.saveSettingsDebounced();
         });
         document.querySelector('#dsum-refresh').addEventListener('click', () => { refreshBalance(); fetchPricing(); });
     }
