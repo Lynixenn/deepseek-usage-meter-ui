@@ -48,7 +48,8 @@
 .dsum-timeline { display: flex; gap: 2px; margin: .5em 0 .2em; }
 .dsum-hour { flex: 1; height: 10px; border-radius: 2px; background: color-mix(in srgb, var(--SmartThemeBorderColor) 45%, transparent); cursor: help; }
 .dsum-hour-peak { background: var(--SmartThemeDangerColor, #f04747); opacity: .9; }
-.dsum-hour-now { outline: 2px solid var(--SmartThemeBodyColor, #fff); outline-offset: 1px; }
+.dsum-hour-now { background: var(--SmartThemeBodyColor, #fff); opacity: 1; }
+.dsum-hour-now.dsum-hour-peak { background: color-mix(in srgb, var(--SmartThemeDangerColor, #f04747) 60%, #fff); opacity: 1; }
 .dsum-timeline-label { font-size: .7em; opacity: .6; margin-bottom: .7em; }
 .dsum-popup-prices { width: 100%; border-collapse: collapse; margin: .6em 0; font-size: .9em; }
 .dsum-popup-prices th, .dsum-popup-prices td { border: 1px solid var(--SmartThemeBorderColor); padding: .25em .5em; text-align: left; font-variant-numeric: tabular-nums; }
