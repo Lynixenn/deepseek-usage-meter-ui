@@ -138,10 +138,14 @@
     const money = value => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 5 }).format(Number(value ?? 0));
     const priceMoney = value => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(Number(value ?? 0));
     const hmToMin = s => { const [h, m] = String(s).split(':').map(Number); return h * 60 + (m || 0); };
-    const beijingMinutesNow = () => Math.floor(((Date.now() + 8 * 3600000) % 86400000) / 60000);
+    const minToHm = min => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+    // Peak hours arrive from the server in Beijing time (UTC+8); shift them into
+    // the user's own timezone so the timeline reads 00-23 in local hours.
+    const beijingToLocal = min => ((min - (480 + new Date().getTimezoneOffset())) % 1440 + 1440) % 1440;
+    const localMinutesNow = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
     const beijingTimeNow = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' });
     function buildTimeline(peakHours, nowMinutes) {
-        const windows = (peakHours ?? []).map(({ start, end }) => ({ start: hmToMin(start), end: hmToMin(end) }));
+        const windows = (peakHours ?? []).map(({ start, end }) => ({ start: beijingToLocal(hmToMin(start)), end: beijingToLocal(hmToMin(end)) }));
         return Array.from({ length: 24 }, (_, h) => {
             const start = h * 60, end = start + 60;
             const peak = windows.some(({ start: s, end: e }) => s <= e ? start < e && end > s : start < e || end > s);
@@ -359,12 +363,12 @@
         const status = pricing.peak
             ? `Peak pricing active - prices ×${pricing.peakMultiplier} (Beijing ${pricing.beijingTime})`
             : `Off-peak pricing (Beijing ${pricing.beijingTime})`;
-        const schedule = (pricing.peakHours ?? []).map(({ start, end }) => `${start}–${end}`).join(' · ');
+        const schedule = (pricing.peakHours ?? []).map(({ start, end }) => `${minToHm(beijingToLocal(hmToMin(start)))}–${minToHm(beijingToLocal(hmToMin(end)))}`).join(' · ');
         const rows = Object.entries(pricing.models).map(([model, p]) => {
             const e = pricing.effective[model] ?? p;
             return `<div class="dsum-model"><b>${model}</b><span>in ${priceMoney(e.cache_miss)}/1M · cached ${priceMoney(e.cache_hit)}/1M · out ${priceMoney(e.output)}/1M</span></div>`;
         }).join('');
-        node.innerHTML = `<div class="dsum-status">${status}</div>${schedule ? `<div class="dsum-schedule">Peak hours (Beijing): ${schedule}</div>` : ''}${rows}<small>Prices fetched from deepseek.com · source: ${pricing.source}${pricing.fetchedAt ? ` · ${new Date(pricing.fetchedAt).toLocaleTimeString()}` : ''}</small>`;
+        node.innerHTML = `<div class="dsum-status">${status}</div>${schedule ? `<div class="dsum-schedule">Peak hours (your time): ${schedule}</div>` : ''}${rows}<small>Prices fetched from deepseek.com · source: ${pricing.source}${pricing.fetchedAt ? ` · ${new Date(pricing.fetchedAt).toLocaleTimeString()}` : ''}</small>`;
         updateStatusline();
         updateWand();
     }
@@ -457,7 +461,7 @@
                 ? `Peak pricing ×${pricing.peakMultiplier}`
                 : 'Off-peak pricing',
             beijingTime: beijingTimeNow(),
-            timeline: buildTimeline(pricing.peakHours, beijingMinutesNow()),
+            timeline: buildTimeline(pricing.peakHours, localMinutesNow()),
             priceRows,
             chatCost: money(totals.cost),
             chatTokens: n(totals.tokens),

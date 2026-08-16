@@ -20,12 +20,12 @@
             <span class="dsum-card-sub">{{sessionText}}</span>
         </div>
     </div>
-    <div class="dsum-timeline" role="img" aria-label="Peak hours timeline (Beijing time)">
+    <div class="dsum-timeline" role="img" aria-label="Peak hours timeline (your time)">
         {{#each timeline}}
         <div class="dsum-hour{{#if this.peak}} dsum-hour-peak{{/if}}{{#if this.now}} dsum-hour-now{{/if}}" title="{{this.label}}:00{{#if this.peak}} - peak pricing{{/if}}{{#if this.now}} ← now{{/if}}"></div>
         {{/each}}
     </div>
-    <div class="dsum-timeline-label">00 · 06 · 12 · 18 · 24 (Beijing time) - <b>peak hours highlighted</b></div>
+    <div class="dsum-timeline-label">00 · 06 · 12 · 18 · 24 (your time) - <b>peak hours highlighted</b></div>
     <table class="dsum-popup-prices">
         <thead><tr><th>Model</th><th>Input /1M</th><th>Cached /1M</th><th>Output /1M</th></tr></thead>
         <tbody>
