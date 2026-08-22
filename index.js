@@ -17,6 +17,7 @@
         peak: false,
         peakMultiplier: 2,
         peakHours: [],
+        weekendOffPeak: false,
         beijingTime: '',
         source: 'fallback',
         fetchedAt: null,
@@ -144,8 +145,15 @@
     const beijingToLocal = min => ((min - (480 + new Date().getTimezoneOffset())) % 1440 + 1440) % 1440;
     const localMinutesNow = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
     const beijingTimeNow = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' });
-    function buildTimeline(peakHours, nowMinutes) {
-        const windows = (peakHours ?? []).map(({ start, end }) => ({ start: beijingToLocal(hmToMin(start)), end: beijingToLocal(hmToMin(end)) }));
+    // Beijing day-of-week (0=Sun..6=Sat). The pricing page makes weekends all
+    // off-peak, so the peak timeline must not highlight any hour on those days.
+    const beijingDayNow = () => new Date(Date.now() + 8 * 3600 * 1000).getUTCDay();
+    const isBeijingWeekend = () => { const d = beijingDayNow(); return d === 0 || d === 6; };
+    function buildTimeline(peakHours, nowMinutes, weekendOffPeak = false) {
+        // On a weekend with the rule live, there are no peak hours to highlight.
+        const windows = (weekendOffPeak && isBeijingWeekend())
+            ? []
+            : (peakHours ?? []).map(({ start, end }) => ({ start: beijingToLocal(hmToMin(start)), end: beijingToLocal(hmToMin(end)) }));
         return Array.from({ length: 24 }, (_, h) => {
             const start = h * 60, end = start + 60;
             const peak = windows.some(({ start: s, end: e }) => s <= e ? start < e && end > s : start < e || end > s);
@@ -360,10 +368,13 @@
     function renderPricing() {
         const node = document.querySelector('#dsum-pricing');
         if (!node) return;
+        const todayOffPeak = pricing.weekendOffPeak && isBeijingWeekend();
         const status = pricing.peak
             ? `Peak pricing active - prices ×${pricing.peakMultiplier} (Beijing ${pricing.beijingTime})`
-            : `Off-peak pricing (Beijing ${pricing.beijingTime})`;
-        const schedule = (pricing.peakHours ?? []).map(({ start, end }) => `${minToHm(beijingToLocal(hmToMin(start)))}–${minToHm(beijingToLocal(hmToMin(end)))}`).join(' · ');
+            : todayOffPeak
+                ? `Off-peak pricing (Beijing ${pricing.beijingTime}) - weekend off-peak all day`
+                : `Off-peak pricing (Beijing ${pricing.beijingTime})`;
+        const schedule = todayOffPeak ? '' : (pricing.peakHours ?? []).map(({ start, end }) => `${minToHm(beijingToLocal(hmToMin(start)))}–${minToHm(beijingToLocal(hmToMin(end)))}`).join(' · ');
         const rows = Object.entries(pricing.models).map(([model, p]) => {
             const e = pricing.effective[model] ?? p;
             return `<div class="dsum-model"><b>${model}</b><span>in ${priceMoney(e.cache_miss)}/1M · cached ${priceMoney(e.cache_hit)}/1M · out ${priceMoney(e.output)}/1M</span></div>`;
@@ -459,9 +470,9 @@
             peak: pricing.peak,
             peakText: pricing.peak
                 ? `Peak pricing ×${pricing.peakMultiplier}`
-                : 'Off-peak pricing',
+                : (pricing.weekendOffPeak && isBeijingWeekend()) ? 'Off-peak pricing · weekend' : 'Off-peak pricing',
             beijingTime: beijingTimeNow(),
-            timeline: buildTimeline(pricing.peakHours, localMinutesNow()),
+            timeline: buildTimeline(pricing.peakHours, localMinutesNow(), pricing.weekendOffPeak),
             priceRows,
             chatCost: money(totals.cost),
             chatTokens: n(totals.tokens),
