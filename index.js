@@ -164,9 +164,21 @@
     const meterUrl = path => `/api/plugins/deepseek-usage-meter${path}`;
     const balanceText = () => balance.infos.map(x => `${x.currency} ${x.total_balance}`).join(' · ') || 'No balance';
 
-    const priceFor = model => pricing.effective[model]
-        ?? pricing.models[model]
-        ?? Object.values(pricing.effective)[0];
+    // The API model id doesn't always equal the pricing page's column name: the
+    // page header can carry a footnote (`deepseek-v4-pro(2)`), and the retired
+    // Flash names now bill under `deepseek-flash`. Normalise both before the
+    // fallback, otherwise the lookup silently prices an unrelated model.
+    const PRICE_ALIASES = {
+        'deepseek-v4-flash': 'deepseek-flash',
+        'deepseek-v4-flash-vision-exp': 'deepseek-flash',
+    };
+    const priceFor = model => {
+        const key = String(model || '').replace(/\(\d+\)\s*$/, '').trim();
+        const alias = PRICE_ALIASES[key];
+        return pricing.effective[key] ?? pricing.models[key]
+            ?? pricing.effective[alias] ?? pricing.models[alias]
+            ?? Object.values(pricing.effective)[0];
+    };
 
     function cost(usage) {
         const p = priceFor(usage.model);
