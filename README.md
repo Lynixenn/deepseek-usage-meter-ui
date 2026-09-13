@@ -1,6 +1,6 @@
 # DeepSeek Usage Meter (extension)
 
-Shows DeepSeek usage in SillyTavern: tokens and cost per message, cached vs fresh input, live balance and prices, and session cache stats.
+Shows DeepSeek and Ollama Cloud usage in SillyTavern: tokens and cost per message, cached vs fresh input, live balance/prices, and session cache stats.
 
 ## Install
 
@@ -21,3 +21,12 @@ Restart the server and refresh the page. If your profile isn't `default-user`, c
 - Peak pricing (prices ×2) only applies inside the announced Beijing-time peak windows on weekdays — weekends are off-peak all day, so no ×2 prices and no peak confirm
 - The first DeepSeek generation during peak hours asks once per page load whether to continue. The request is held until you answer (nothing is sent on Cancel); refresh SillyTavern to be asked again
 - Settings > DeepSeek Usage Meter: enable "Peak confirm test mode" to hold and confirm every generation, so you can test the flow outside peak hours
+
+## Ollama Cloud
+
+Ollama Cloud models are priced per million tokens on [ollama.com/pricing](https://ollama.com/pricing), with a peak surcharge (×2) for the DeepSeek models between 12:00 and 18:00 UTC, Monday to Friday. Both are scraped live and applied per message, the same way the DeepSeek rates are.
+
+- Point SillyTavern at a **Custom (OpenAI-compatible)** source with `http://localhost:11434/v1` — Ollama's OpenAI shim reports `prompt_tokens_details.cached_tokens`, which the meter needs for the cached/fresh split
+- The provider is resolved per message, so DeepSeek and Ollama chats can be interleaved; peak detection uses the UTC window for Ollama and the Beijing one for DeepSeek
+- The session/weekly quota windows (`session` = 5h, `weekly` = 7d) need an **Ollama API key** in Settings > DeepSeek Usage Meter; it is only forwarded to `ollama.com/api/usage` and never persisted server-side
+- Local (non-cloud) Ollama models are not in the pricing table and are left unpriced rather than mis-billed

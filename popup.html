@@ -2,6 +2,7 @@
     <h3 data-i18n="DeepSeek Usage">DeepSeek Usage</h3>
     <div class="dsum-popup-head">
         <span class="dsum-pill dsum-{{#if peak}}bad{{else}}ok{{/if}}">{{peakText}}</span>
+        <span class="dsum-pill dsum-{{#if ollamaPeak}}bad{{else}}ok{{/if}}">{{ollamaPeakText}}</span>
         <span class="dsum-clock">Beijing <b>{{beijingTime}}</b></span>
     </div>
     <div class="dsum-cards">
@@ -9,6 +10,7 @@
             <span class="dsum-card-label">Balance</span>
             <span class="dsum-card-value">{{balanceText}}</span>
             <span class="dsum-pill dsum-{{#if isAvailable}}ok{{else}}bad{{/if}}">{{#if isAvailable}}available{{else}}insufficient{{/if}}</span>
+            <span class="dsum-card-sub">{{quotaText}}</span>
         </div>
         <div class="dsum-card">
             <span class="dsum-card-label">This chat</span>
@@ -30,7 +32,7 @@
         <thead><tr><th>Model</th><th>Input /1M</th><th>Cached /1M</th><th>Output /1M</th></tr></thead>
         <tbody>
         {{#each priceRows}}
-        <tr class="{{#if this.current}}dsum-current{{/if}}"><td>{{this.model}}{{#if this.current}} <span class="dsum-now-model">· in use</span>{{/if}}</td><td>{{this.cacheMiss}}</td><td>{{this.cacheHit}}</td><td>{{this.output}}</td></tr>
+        {{#if this.group}}<tr class="dsum-group-row"><td colspan="4">{{this.group}}</td></tr>{{else}}<tr class="{{#if this.current}}dsum-current{{/if}}"><td>{{this.model}}{{#if this.current}} <span class="dsum-now-model">· in use</span>{{/if}}</td><td>{{this.cacheMiss}}</td><td>{{this.cacheHit}}</td><td>{{this.output}}</td></tr>{{/if}}
         {{/each}}
         </tbody>
     </table>
@@ -41,5 +43,5 @@
     <div class="dsum-popup-row dsum-popup-actions">
         <button id="dsum-popup-refresh" class="menu_button"><i class="fa-solid fa-rotate"></i> Refresh balance &amp; prices</button>
     </div>
-    <div class="dsum-popup-foot"><small>Prices fetched from deepseek.com · source: {{source}}{{#if fetchedAt}} · updated {{fetchedAt}}{{/if}}</small></div>
+    <div class="dsum-popup-foot"><small>DeepSeek prices from deepseek.com · source: {{source}}{{#if fetchedAt}} · updated {{fetchedAt}}{{/if}} · Ollama prices from ollama.com · source: {{ollamaSource}}</small></div>
 </div>

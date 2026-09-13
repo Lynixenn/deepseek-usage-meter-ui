@@ -56,6 +56,7 @@
 .dsum-popup-prices th { opacity: .7; font-weight: normal; }
 .dsum-current { background: color-mix(in srgb, var(--SmartThemeGoodColor, #6fbf73) 14%, transparent); }
 .dsum-now-model { font-size: .8em; opacity: .7; }
+.dsum-group-row td { font-weight: 700; opacity: .75; background: color-mix(in srgb, var(--SmartThemeBorderColor) 25%, transparent); }
 .dsum-popup-row { margin: .4em 0; }
 .dsum-popup-foot { margin-top: .6em; }
 .dsum-popup-foot small { opacity: .7; }
