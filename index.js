@@ -75,14 +75,18 @@
 
     // Ollama's OpenAI shim reports the standard shape (`cached_tokens` nested in
     // `prompt_tokens_details`); DeepSeek reports the cache fields at the top level.
-    function usageFrom(body) {
-        const model = String(body.model || '');
+    // Response bodies carry no `chat_completion_source`, so the request that
+    // produced them is passed in - without it a `:cloud` model whose name is also
+    // in the DeepSeek table would be attributed to the wrong provider.
+    function usageFrom(body, request = {}) {
+        const model = String(body.model || request.model || '');
+        const source = body.chat_completion_source ?? request.source ?? '';
         const usage = body.usage;
-        if (!usage || !providerFor(model, body.chat_completion_source)) return null;
+        if (!usage || !providerFor(model, source)) return null;
         const hit = usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0;
         return {
             model,
-            source: body.chat_completion_source ?? '',
+            source,
             prompt_tokens: usage.prompt_tokens ?? 0,
             prompt_cache_hit_tokens: hit,
             prompt_cache_miss_tokens: usage.prompt_cache_miss_tokens ?? Math.max(0, (usage.prompt_tokens ?? 0) - hit),
@@ -92,11 +96,11 @@
         };
     }
 
-    function extractUsage(text) {
+    function extractUsage(text, request) {
         // Non-streaming: the whole body is one JSON object.
         try {
             const json = JSON.parse(text);
-            const usage = usageFrom(json);
+            const usage = usageFrom(json, request);
             if (usage) return usage;
         } catch { /* fall through to SSE parsing */ }
         // Streaming: usage arrives in the last data chunk that carries it.
@@ -104,11 +108,30 @@
         for (const line of String(text).split('\n')) {
             if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
             try {
-                const usage = usageFrom(JSON.parse(line.slice(6)));
+                const usage = usageFrom(JSON.parse(line.slice(6)), request);
                 if (usage) found = usage;
             } catch { /* malformed chunk */ }
         }
         return found;
+    }
+
+    // ST rebuilds the upstream request from a fixed allow-list of keys that has no
+    // `stream_options`, so the flag below never reaches the provider on its own and
+    // streamed replies come back without any usage at all. The Custom source
+    // additionally merges `custom_include_body` (YAML text) into that body, which is
+    // the one route that survives the rebuild - so append it there too, leaving any
+    // YAML the user already wrote untouched.
+    function requestUsage(parsed) {
+        if (!parsed.stream) return;
+        parsed.stream_options = { ...(parsed.stream_options || {}), include_usage: true };
+        if (parsed.chat_completion_source !== 'custom') return;
+        const isOllama = providerFor(parsed.model, parsed.chat_completion_source) === 'ollama'
+            || /:11434\b|\/ollama\b/i.test(String(parsed.custom_url ?? ''));
+        if (!isOllama) return;
+        const yaml = String(parsed.custom_include_body ?? '');
+        if (/stream_options\s*:/.test(yaml)) return;
+        const existing = yaml.trimEnd();
+        parsed.custom_include_body = `${existing ? `${existing}\n` : ''}stream_options:\n  include_usage: true\n`;
     }
 
     function patchFetch() {
@@ -116,17 +139,18 @@
         const patched = async function (input, init) {
             const url = typeof input === 'string' ? input : input?.url;
             const isGenerate = typeof url === 'string' && url.includes(GENERATE_URL);
+            // One generation is in flight at a time, so the newest request context
+            // identifies the response; the capture queue is FIFO for the same reason.
+            let request = { model: '', source: '' };
             if (isGenerate && init && typeof init.body === 'string' && (init.method === undefined || init.method === 'POST')) {
                 let parsed = null;
                 try {
                     parsed = JSON.parse(init.body);
                 } catch { /* body is not JSON */ }
                 if (parsed) {
-                    // DeepSeek only reports usage in streams when asked to.
-                    if (parsed.stream) {
-                        parsed.stream_options = { ...(parsed.stream_options || {}), include_usage: true };
-                        init = { ...init, body: JSON.stringify(parsed) };
-                    }
+                    request = { model: parsed.model, source: parsed.chat_completion_source };
+                    requestUsage(parsed);
+                    init = { ...init, body: JSON.stringify(parsed) };
                     // Hold the request until the once-per-page-load peak confirm
                     // is answered; the request is not sent until Continue is clicked.
                     if (providerFor(parsed.model, parsed.chat_completion_source)) {
@@ -147,7 +171,7 @@
             if (isGenerate && response.ok) {
                 response.clone().text()
                     .then(text => {
-                        const usage = extractUsage(text);
+                        const usage = extractUsage(text, request);
                         if (usage) capturedQueue.push(usage);
                     })
                     .catch(() => { });

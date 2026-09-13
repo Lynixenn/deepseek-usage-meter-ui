@@ -9,8 +9,13 @@ import { readFileSync } from 'node:fs';
 // helpers out of the source with the pricing tables injected.
 const src = readFileSync(new URL('./index.js', import.meta.url), 'utf8');
 const slice = (from, to) => src.slice(src.indexOf(from), src.indexOf(to));
-const body = slice('function usageFrom(', 'function extractUsage(') + slice('const PRICE_ALIASES', 'const usageForMessage');
-const build = new Function('pricing', 'ollama', `${body}\nreturn { usageFrom, cost, providerFor, priceFor };`);
+const body = [
+    slice('const PRICE_ALIASES', 'const usageForMessage'),
+    slice('function usageFrom(', 'function extractUsage('),
+    slice('function extractUsage(', 'function requestUsage('),
+    slice('function requestUsage(', 'function patchFetch('),
+].join('\n');
+const build = new Function('pricing', 'ollama', `${body}\nreturn { usageFrom, extractUsage, requestUsage, cost, providerFor, priceFor };`);
 
 const pricing = {
     models: { 'deepseek-v4-pro': { cache_hit: 0.022, cache_miss: 0.66, output: 1.98 } },
@@ -64,6 +69,54 @@ assert.equal(api.providerFor('deepseek-v4-pro', undefined), 'deepseek');
 assert.equal(api.cost({ model: 'deepseek-v4-pro', prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 1000, completion_tokens: 0 }), 0.66 / 1000);
 
 console.log('provider-aware pricing: ok');
+
+// ST rebuilds the upstream body from a fixed allow-list with no `stream_options`,
+// so the flag must also travel via the Custom source's `custom_include_body` YAML
+// - otherwise streamed Ollama replies carry no usage at all.
+const ollamaStream = [
+    'data: {"id":"chatcmpl-1","model":"deepseek-v4-pro","choices":[{"delta":{"content":"hi"}}]}',
+    '',
+    'data: {"id":"chatcmpl-1","model":"deepseek-v4-pro","choices":[],"usage":{"prompt_tokens":395,"prompt_tokens_details":{"cached_tokens":371},"completion_tokens":12,"total_tokens":407}}',
+    '',
+    'data: [DONE]',
+    '',
+].join('\n');
+
+const cloudRequest = { model: 'deepseek-v4-pro:cloud', source: 'custom' };
+const streamed = api.extractUsage(ollamaStream, cloudRequest);
+assert.ok(streamed, 'streamed Ollama usage chunk must be captured');
+assert.equal(streamed.prompt_cache_hit_tokens, 371, 'cached_tokens must map to cache_hit');
+assert.equal(streamed.prompt_cache_miss_tokens, 24, 'miss must be prompt - cached');
+assert.equal(streamed.completion_tokens, 12);
+// The response body has no chat_completion_source; without the request context
+// this model would fall back to the DeepSeek rate card and peak schedule.
+assert.equal(streamed.source, 'custom');
+assert.equal(api.providerFor(streamed.model, streamed.source), 'ollama');
+const streamedCost = api.cost(streamed);
+assert.equal(streamedCost, (371 * 0.044 + 24 * 1.32 + 12 * 3.96) / 1e6, 'must price on the Ollama peak card');
+assert.ok(streamedCost < api.cost({ ...streamed, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 395 }), 'cache hits must be cheaper');
+
+// requestUsage: YAML for the custom source, untouched for other sources.
+const customBody = { stream: true, chat_completion_source: 'custom', custom_url: 'http://localhost:11434/v1', model: 'deepseek-v4-pro:cloud' };
+api.requestUsage(customBody);
+assert.equal(customBody.stream_options.include_usage, true);
+assert.equal(customBody.custom_include_body, 'stream_options:\n  include_usage: true\n');
+// Existing YAML must be preserved, and a user-set stream_options left alone.
+const withYaml = { stream: true, chat_completion_source: 'custom', custom_url: 'http://localhost:11434/v1', model: 'deepseek-v4-pro:cloud', custom_include_body: 'temperature: 0.7\n' };
+api.requestUsage(withYaml);
+assert.equal(withYaml.custom_include_body, 'temperature: 0.7\nstream_options:\n  include_usage: true\n');
+const preset = { ...customBody, custom_include_body: 'stream_options:\n  include_usage: false\n' };
+api.requestUsage(preset);
+assert.equal(preset.custom_include_body, 'stream_options:\n  include_usage: false\n', 'must not fight a user-set value');
+// Non-Ollama custom endpoints and non-custom sources must not be touched.
+const otherCustom = { stream: true, chat_completion_source: 'custom', custom_url: 'https://api.example.com/v1', model: 'gpt-5.5' };
+api.requestUsage(otherCustom);
+assert.equal(otherCustom.custom_include_body, undefined, 'must not inject into unrelated custom endpoints');
+const deepseekBody = { stream: true, chat_completion_source: 'deepseek', model: 'deepseek-v4-pro' };
+api.requestUsage(deepseekBody);
+assert.equal(deepseekBody.custom_include_body, undefined, 'custom_include_body is custom-source only');
+
+console.log('ollama stream capture + usage request injection: ok');
 
 // Regression check for renderQuota: the bars clamp to 0..100%, expose the value
 // to assistive tech, and flag the warning/exhausted states.
