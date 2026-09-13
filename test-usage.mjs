@@ -64,3 +64,35 @@ assert.equal(api.providerFor('deepseek-v4-pro', undefined), 'deepseek');
 assert.equal(api.cost({ model: 'deepseek-v4-pro', prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 1000, completion_tokens: 0 }), 0.66 / 1000);
 
 console.log('provider-aware pricing: ok');
+
+// Regression check for renderQuota: the bars clamp to 0..100%, expose the value
+// to assistive tech, and flag the warning/exhausted states.
+const quotaSrc = slice('function renderQuota(', 'const quotaPct =');
+const makeQuota = new Function('settings', 'ollamaQuota', 'document', `${quotaSrc}\nreturn renderQuota;`);
+
+const runQuota = (apiKey, session, weekly) => {
+    const node = { innerHTML: '' };
+    const documentStub = { querySelector: sel => sel === '#dsum-quota' ? node : null };
+    // The extracted function closes over the injected scope, so bind then call.
+    makeQuota({ ollamaApiKey: apiKey }, { session, weekly }, documentStub)();
+    return node.innerHTML;
+};
+
+assert.match(runQuota('', null, null), /Add an Ollama API key/, 'no key should explain itself instead of drawing bars');
+assert.match(runQuota('k', null, null), /quota unavailable/);
+const bars = runQuota('k', 0.03, 0.95);
+assert.match(bars, /width:3\.0%/, 'session bar width');
+assert.match(bars, /width:95\.0%/, 'weekly bar width');
+assert.match(bars, /aria-valuenow="95"/, 'aria value must be a rounded percent');
+assert.match(bars, /95\.0% used/, 'aria-valuetext must read the percentage');
+assert.equal((bars.match(/role="progressbar"/g) ?? []).length, 2, 'exactly two bars');
+assert.match(bars, /dsum-quota-warn/, 'weekly at 95% must warn');
+// Low usage on both windows must not be flagged at all.
+const calm = runQuota('k', 0.03, 0.03);
+assert.ok(!/dsum-quota-warn|dsum-quota-full/.test(calm), 'low usage must not warn');
+// An over-quota session clamps to 100% and flags exhausted.
+const over = runQuota('k', 1.4, 0.1);
+assert.match(over, /width:100\.0%/, 'width must clamp at 100%');
+assert.match(over, /dsum-quota-full/);
+
+console.log('renderQuota: bars, clamping, and states ok');

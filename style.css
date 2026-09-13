@@ -1,17 +1,21 @@
 /* ===== Settings drawer (position: inside #extensions_settings) ===== */
 #dsum-settings label { display: block; margin: .45em 0; }
-#dsum-settings small { display: block; opacity: .7; margin-top: .6em; }
 .dsum-statusline { display: flex; align-items: center; justify-content: space-between; gap: .6em; margin: .2em 0 .4em; }
 .dsum-peak-state { font-weight: 700; font-size: .85em; padding: .15em .6em; border-radius: 999px; }
 .dsum-peak-state.dsum-ok { color: var(--SmartThemeGoodColor, #6fbf73); background: color-mix(in srgb, var(--SmartThemeGoodColor, #6fbf73) 15%, transparent); }
 .dsum-peak-state.dsum-bad { color: var(--SmartThemeDangerColor, #f04747); background: color-mix(in srgb, var(--SmartThemeDangerColor, #f04747) 15%, transparent); }
 .dsum-clock { font-size: .82em; opacity: .75; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.dsum-pricing { margin: .5em 0; font-size: .85em; }
-.dsum-status { font-weight: bold; margin-bottom: .3em; }
-.dsum-status:empty { display: none; }
-.dsum-schedule { font-size: .8em; opacity: .8; margin: -.1em 0 .4em; }
-.dsum-model { display: flex; justify-content: space-between; gap: .6em; opacity: .85; }
-.dsum-model span { text-align: right; }
+.dsum-quota { display: flex; flex-direction: column; gap: .35em; margin: .55em 0; }
+.dsum-quota-row { display: grid; grid-template-columns: 5.5em 1fr 3.2em; align-items: center; gap: .5em; }
+.dsum-quota-label { font-size: .82em; white-space: nowrap; }
+.dsum-quota-unit { opacity: .6; }
+.dsum-quota-track { display: block; height: .55em; border-radius: 999px; background: color-mix(in srgb, var(--SmartThemeBorderColor) 60%, transparent); overflow: hidden; }
+.dsum-quota-fill { display: block; height: 100%; border-radius: 999px; background: var(--SmartThemeGoodColor, #6fbf73); transition: width .3s ease; }
+.dsum-quota-warn .dsum-quota-fill { background: var(--SmartThemeDangerColor, #f04747); }
+.dsum-quota-full .dsum-quota-fill { background: var(--SmartThemeDangerColor, #f04747); }
+.dsum-quota-warn .dsum-quota-value, .dsum-quota-full .dsum-quota-value { color: var(--SmartThemeDangerColor, #f04747); font-weight: 700; }
+.dsum-quota-value { font-size: .82em; text-align: right; font-variant-numeric: tabular-nums; }
+.dsum-quota-hint { font-size: .82em; opacity: .7; }
 .dsum-grid { display: flex; flex-wrap: wrap; gap: .35em 1.2em; margin: .5em 0; }
 .dsum-total { margin: 0; font-size: .85em; }
 .dsum-total b { font-variant-numeric: tabular-nums; }

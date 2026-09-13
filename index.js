@@ -168,6 +168,7 @@
     const utcToLocal = min => ((min - new Date().getTimezoneOffset()) % 1440 + 1440) % 1440;
     const localMinutesNow = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
     const beijingTimeNow = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' });
+    const utcTimeNow = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
     // Beijing day-of-week (0=Sun..6=Sat). The pricing page makes weekends all
     // off-peak, so the peak timeline must not highlight any hour on those days.
     const beijingDayNow = () => new Date(Date.now() + 8 * 3600 * 1000).getUTCDay();
@@ -437,51 +438,54 @@
         updateWand();
     }
 
-    function renderPricing() {
-        const node = document.querySelector('#dsum-pricing');
-        if (!node) return;
-        const todayOffPeak = pricing.weekendOffPeak && isBeijingWeekend();
-        const status = pricing.peak
-            ? `Peak pricing active - prices ×${pricing.peakMultiplier} (Beijing ${pricing.beijingTime})`
-            : todayOffPeak
-                ? `Off-peak pricing (Beijing ${pricing.beijingTime}) - weekend off-peak all day`
-                : `Off-peak pricing (Beijing ${pricing.beijingTime})`;
-        const schedule = todayOffPeak ? '' : (pricing.peakHours ?? []).map(({ start, end }) => `${minToHm(beijingToLocal(hmToMin(start)))}–${minToHm(beijingToLocal(hmToMin(end)))}`).join(' · ');
-        const rows = Object.entries(pricing.models).map(([model, p]) => {
-            const e = pricing.effective[model] ?? p;
-            return `<div class="dsum-model"><b>${model}</b><span>in ${priceMoney(e.cache_miss)}/1M · cached ${priceMoney(e.cache_hit)}/1M · out ${priceMoney(e.output)}/1M</span></div>`;
-        }).join('');
-        node.innerHTML = `<div class="dsum-status">${status}</div>${schedule ? `<div class="dsum-schedule">Peak hours (your time): ${schedule}</div>` : ''}${rows}<small>Prices fetched from deepseek.com · source: ${pricing.source}${pricing.fetchedAt ? ` · ${new Date(pricing.fetchedAt).toLocaleTimeString()}` : ''}</small>`;
-        updateStatusline();
-        updateWand();
-    }
-
     function updateStatusline() {
         const state = document.querySelector('#dsum-peak-state');
         if (state) {
-            state.textContent = pricing.peak ? `Peak ×${pricing.peakMultiplier}` : 'Off-peak';
+            state.textContent = pricing.peak ? `DeepSeek peak ×${pricing.peakMultiplier}` : 'DeepSeek off-peak';
             state.className = `dsum-peak-state ${pricing.peak ? 'dsum-bad' : 'dsum-ok'}`;
+            const window = (pricing.peakHours ?? []).map(({ start, end }) => `${minToHm(beijingToLocal(hmToMin(start)))}–${minToHm(beijingToLocal(hmToMin(end)))}`).join(' · ');
+            state.title = window ? `Peak hours (your time): ${window}` : '';
         }
         const clock = document.querySelector('#dsum-bj-clock');
         if (clock) clock.textContent = `Beijing ${beijingTimeNow()}`;
+
+        const ollamaState = document.querySelector('#dsum-ollama-state');
+        if (ollamaState) {
+            ollamaState.textContent = ollama.peak ? `Ollama peak ×${ollama.peakMultiplier}` : 'Ollama off-peak';
+            ollamaState.className = `dsum-peak-state ${ollama.peak ? 'dsum-bad' : 'dsum-ok'}`;
+            const window = (ollama.peakHours ?? []).map(({ start, end }) => `${minToHm(utcToLocal(hmToMin(start)))}–${minToHm(utcToLocal(hmToMin(end)))}`).join(' · ');
+            ollamaState.title = window ? `Peak ${ollama.peakDays} ${window} (your time)` : '';
+        }
+        const utcClock = document.querySelector('#dsum-utc-clock');
+        if (utcClock) utcClock.textContent = `UTC ${utcTimeNow()}`;
     }
 
-    function renderOllamaPricing() {
-        const node = document.querySelector('#dsum-ollama-pricing');
+    // Session (5h) and weekly (7d) allowance, as the two bars ollama.com shows.
+    // `usage` is a 0..1 fraction of the window, not a token or dollar amount.
+    function renderQuota() {
+        const node = document.querySelector('#dsum-quota');
         if (!node) return;
-        if (!Object.keys(ollama.models).length) {
-            node.innerHTML = '<small>Ollama prices unavailable</small>';
+        if (!settings.ollamaApiKey) {
+            node.innerHTML = '<div class="dsum-quota-hint">Add an Ollama API key to show the session and weekly usage bars.</div>';
             return;
         }
-        const status = ollama.peak
-            ? `Ollama peak pricing active - prices ×${ollama.peakMultiplier} (UTC ${ollama.utcTime})`
-            : `Ollama off-peak (UTC ${ollama.utcTime})`;
-        const rule = `peak ${ollama.peakDays} ${(ollama.peakHours ?? []).map(({ start, end }) => `${minToHm(utcToLocal(hmToMin(start)))}–${minToHm(utcToLocal(hmToMin(end)))}`).join(' · ')} (your time)`;
-        const rows = Object.entries(ollama.models).map(([model, p]) => {
-            const e = ollama.effective[model] ?? p;
-            return `<div class="dsum-model"><b>${model}</b><span>in ${priceMoney(e.cache_miss)}/1M · cached ${priceMoney(e.cache_hit)}/1M · out ${priceMoney(e.output)}/1M</span></div>`;
+        if (ollamaQuota.session == null && ollamaQuota.weekly == null) {
+            node.innerHTML = '<div class="dsum-quota-hint">Ollama quota unavailable.</div>';
+            return;
+        }
+        const bars = [['Session', '5h', ollamaQuota.session], ['Weekly', '7d', ollamaQuota.weekly]];
+        node.innerHTML = bars.map(([label, span, value]) => {
+            const fraction = value == null ? null : Math.min(1, Math.max(0, Number(value)));
+            const pct = fraction == null ? 0 : fraction * 100;
+            const state = fraction == null ? '' : fraction >= 1 ? ' dsum-quota-full' : fraction >= 0.9 ? ' dsum-quota-warn' : '';
+            return `<div class="dsum-quota-row${state}">
+                <span class="dsum-quota-label">${label} <span class="dsum-quota-unit">${span}</span></span>
+                <span class="dsum-quota-track" role="progressbar" aria-label="${label} allowance used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}" aria-valuetext="${fraction == null ? 'unavailable' : `${pct.toFixed(1)}% used`}">
+                    <span class="dsum-quota-fill" style="width:${pct.toFixed(1)}%"></span>
+                </span>
+                <span class="dsum-quota-value">${fraction == null ? '-' : `${pct.toFixed(1)}%`}</span>
+            </div>`;
         }).join('');
-        node.innerHTML = `<div class="dsum-status">${status}${ollama.peak ? '' : ` · ${rule}`}</div>${rows}<small>Prices fetched from ollama.com · source: ${ollama.source}${ollama.fetchedAt ? ` · ${new Date(ollama.fetchedAt).toLocaleTimeString()}` : ''}</small>`;
     }
 
     const quotaPct = value => value == null ? '-' : `${(Number(value) * 100).toFixed(1)}%`;
@@ -506,8 +510,7 @@
                 console.debug('[DeepSeek Usage Meter]', error.message);
             }
         }
-        const node = document.querySelector('#dsum-ollama-quota');
-        if (node) node.textContent = quotaText();
+        renderQuota();
     }
 
     async function fetchOllamaPricing() {
@@ -520,7 +523,7 @@
             ollama = { ...ollama, source: 'fallback' };
             console.debug('[DeepSeek Usage Meter]', error.message);
         }
-        renderOllamaPricing();
+        updateStatusline();
         updateWand();
     }
 
@@ -591,7 +594,8 @@
             pricing = { ...pricing, source: 'fallback' };
             console.debug('[DeepSeek Usage Meter]', error.message);
         }
-        renderPricing();
+        updateStatusline();
+        updateWand();
     }
 
     // Renders the popup HTML from the currently cached pricing/balance state.
@@ -688,12 +692,11 @@
                 <span id="dsum-peak-state" class="dsum-peak-state dsum-ok">Off-peak</span>
                 <span id="dsum-bj-clock" class="dsum-clock">Beijing -</span>
               </div>
-              <div id="dsum-pricing" class="dsum-pricing"></div>
               <div class="dsum-statusline">
-                <span class="dsum-peak-state dsum-ok">Ollama Cloud</span>
-                <span id="dsum-ollama-quota" class="dsum-clock">-</span>
+                <span id="dsum-ollama-state" class="dsum-peak-state dsum-ok">Ollama off-peak</span>
+                <span id="dsum-utc-clock" class="dsum-clock">UTC -</span>
               </div>
-              <div id="dsum-ollama-pricing" class="dsum-pricing"></div>
+              <div id="dsum-quota" class="dsum-quota"></div>
               <label class="dsum-token-row">Ollama API key (quota only)
                 <span class="dsum-token-wrap"><input id="dsum-ollama-key" class="text_pole" type="password"><button id="dsum-ollama-key-toggle" class="menu_button dsum-token-toggle" type="button" title="Show/hide key"><i class="fa-solid fa-eye"></i></button></span>
               </label>
@@ -708,11 +711,10 @@
               <label class="dsum-token-row">Meter token (optional)
                 <span class="dsum-token-wrap"><input id="dsum-token" class="text_pole" type="password"><button id="dsum-token-toggle" class="menu_button dsum-token-toggle" type="button" title="Show/hide token"><i class="fa-solid fa-eye"></i></button></span>
               </label>
-              <label class="dsum-check-row">Peak confirm test mode
+              <label class="dsum-check-row" title="Holds every priced generation so you can test the peak confirm outside peak hours">Peak confirm test mode
                 <input id="dsum-test-mode" type="checkbox">
               </label>
-              <small>Holds every priced generation and asks to continue, so you can test the peak confirm outside peak hours.</small>
-              <div class="dsum-hint">Per-message usage (cost, cached/missed tokens) is captured automatically from SillyTavern's chat-completion response. DeepSeek needs the native <code>deepseek</code> source on <code>api.deepseek.com</code>; Ollama Cloud goes through a custom OpenAI-compatible source pointed at <code>localhost:11434/v1</code> (its OpenAI shim reports cached tokens). Click any per-message cost or token stats for the full view.</div>
+              <div class="dsum-hint">Live prices and the 24h peak timeline are in the popup (<code>/dsum</code> or the wand button). Per-message cost and cached/missed tokens are captured automatically from the chat-completion response.</div>
             </div>
           </div>`);
         for (const [inputId, toggleId, key, onChange] of [
