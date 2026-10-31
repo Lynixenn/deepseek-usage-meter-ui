@@ -70,6 +70,45 @@ assert.equal(api.cost({ model: 'deepseek-v4-pro', prompt_cache_hit_tokens: 0, pr
 
 console.log('provider-aware pricing: ok');
 
+// Ollama's native metrics shape. The API now reports `prompt_eval_count` for the
+// whole prompt and `prompt_eval_cached_count` for the cached part (optional in
+// Ollama's types, so it can be absent), and `eval_count` for the output. These
+// must fold onto the same fields the cost math uses; without this the meter
+// showed every native-Ollama request as fully uncached.
+const native = api.usageFrom({
+    model: 'deepseek-v4-pro:cloud',
+    chat_completion_source: 'custom',
+    usage: { prompt_eval_count: 1000, prompt_eval_cached_count: 900, eval_count: 50 },
+});
+assert.ok(native, 'native metric shape must be captured');
+assert.equal(native.prompt_tokens, 1000, 'prompt_eval_count maps to prompt_tokens');
+assert.equal(native.prompt_cache_hit_tokens, 900, 'prompt_eval_cached_count maps to cache hit');
+assert.equal(native.prompt_cache_miss_tokens, 100, 'miss must be prompt - cached');
+assert.equal(native.completion_tokens, 50, 'eval_count maps to completion_tokens');
+assert.equal(api.cost(native), (900 * 0.044 + 100 * 1.32 + 50 * 3.96) / 1e6,
+    'native metrics must price identically to the shim shape');
+
+// The cached count is optional: absent means nothing was served from cache, so
+// the whole prompt bills at the miss rate rather than being dropped.
+const noCacheField = api.usageFrom({
+    model: 'deepseek-v4-pro:cloud', chat_completion_source: 'custom',
+    usage: { prompt_eval_count: 400, eval_count: 10 },
+});
+assert.equal(noCacheField.prompt_cache_hit_tokens, 0);
+assert.equal(noCacheField.prompt_cache_miss_tokens, 400);
+
+// A provider reporting more cached than prompt tokens must clamp instead of
+// producing a negative miss, which would subtract money from the total.
+const overReported = api.usageFrom({
+    model: 'deepseek-v4-pro:cloud', chat_completion_source: 'custom',
+    usage: { prompt_eval_count: 100, prompt_eval_cached_count: 250, eval_count: 1 },
+});
+assert.equal(overReported.prompt_cache_hit_tokens, 100, 'cached must clamp to the prompt size');
+assert.equal(overReported.prompt_cache_miss_tokens, 0, 'miss must never go negative');
+assert.ok(api.cost(overReported) >= 0);
+
+console.log('ollama native metrics shape: ok');
+
 // ST rebuilds the upstream body from a fixed allow-list with no `stream_options`,
 // so the flag must also travel via the Custom source's `custom_include_body` YAML
 // - otherwise streamed Ollama replies carry no usage at all.
@@ -118,34 +157,94 @@ assert.equal(deepseekBody.custom_include_body, undefined, 'custom_include_body i
 
 console.log('ollama stream capture + usage request injection: ok');
 
-// Regression check for renderQuota: the bars clamp to 0..100%, expose the value
-// to assistive tech, and flag the warning/exhausted states.
-const quotaSrc = slice('function renderQuota(', 'const quotaPct =');
-const makeQuota = new Function('settings', 'ollamaQuota', 'document', `${quotaSrc}\nreturn renderQuota;`);
+// Regression check for renderQuota. The balance endpoint changed: it used to
+// answer with session/weekly percentage windows, and now reports USD credits
+// (`included` allowance + `purchased`) with the legacy windows kept only for
+// older plans. Both shapes must render, and the bar must clamp to 0..100% and
+// flag the warning/exhausted states.
+// renderQuota lives between its declaration and hasLegacyQuota; renderLegacyQuota
+// sits between that and quotaPct, so they are sliced separately to avoid
+// re-declaring the helpers that are injected here.
+const quotaSrc = [
+    slice('function renderQuota(', 'function hasLegacyQuota'),
+    slice('function renderLegacyQuota(', 'const quotaPct'),
+].join('\n');
+const makeQuota = new Function('settings', 'ollamaQuota', 'document', 'money', 'hasLegacyQuota', 'quotaFrom', `${quotaSrc}\nreturn renderQuota;`);
 
-const runQuota = (apiKey, session, weekly) => {
+const money = value => `$${Number(value ?? 0).toFixed(2)}`;
+const quotaFromSrc = slice('function quotaFrom(', 'const n = value');
+const quotaFrom = new Function(`${quotaFromSrc}\nreturn quotaFrom;`)();
+const runQuota = (apiKey, raw) => {
     const node = { innerHTML: '' };
     const documentStub = { querySelector: sel => sel === '#dsum-quota' ? node : null };
-    // The extracted function closes over the injected scope, so bind then call.
-    makeQuota({ ollamaApiKey: apiKey }, { session, weekly }, documentStub)();
+    // Mirror the real module: the raw endpoint body is normalised first.
+    const quota = quotaFrom(raw);
+    makeQuota({ ollamaApiKey: apiKey }, quota, documentStub, money,
+        () => quota.session != null || quota.weekly != null,
+        quotaFrom)();
     return node.innerHTML;
 };
 
-assert.match(runQuota('', null, null), /Add an Ollama API key/, 'no key should explain itself instead of drawing bars');
-assert.match(runQuota('k', null, null), /quota unavailable/);
-const bars = runQuota('k', 0.03, 0.95);
-assert.match(bars, /width:3\.0%/, 'session bar width');
-assert.match(bars, /width:95\.0%/, 'weekly bar width');
-assert.match(bars, /aria-valuenow="95"/, 'aria value must be a rounded percent');
-assert.match(bars, /95\.0% used/, 'aria-valuetext must read the percentage');
-assert.equal((bars.match(/role="progressbar"/g) ?? []).length, 2, 'exactly two bars');
-assert.match(bars, /dsum-quota-warn/, 'weekly at 95% must warn');
-// Low usage on both windows must not be flagged at all.
-const calm = runQuota('k', 0.03, 0.03);
-assert.ok(!/dsum-quota-warn|dsum-quota-full/.test(calm), 'low usage must not warn');
-// An over-quota session clamps to 100% and flags exhausted.
-const over = runQuota('k', 1.4, 0.1);
-assert.match(over, /width:100\.0%/, 'width must clamp at 100%');
-assert.match(over, /dsum-quota-full/);
+// No key explains itself instead of drawing bars.
+assert.match(runQuota('', null), /Add an Ollama API key/, 'no key should explain itself');
+// A key with an unusable body says the balance is unavailable.
+assert.match(runQuota('k', {}), /balance unavailable/);
 
-console.log('renderQuota: bars, clamping, and states ok');
+// Current API: included allowance 100 with 72.50 left => 27.5% used.
+const credits = runQuota('k', {
+    included: { balance_usd: 72.5, allowance_usd: 100, period: { from: '2026-09-15T09:30:00Z', until: '2026-10-15T09:30:00Z' } },
+    purchased: { balance_usd: 25 },
+});
+assert.match(credits, /width:27\.5%/, 'used fraction must be derived from allowance - balance');
+assert.match(credits, /aria-valuenow="28"/, "aria value must be a rounded percent (27.5 rounds to 28)");
+assert.match(credits, /27\.5% used/, 'aria-valuetext must read the percentage');
+assert.match(credits, /\$72\.50/, 'remaining included credit must be shown');
+assert.match(credits, /purchased \$25\.00/, 'purchased credit must be shown');
+assert.equal((credits.match(/role="progressbar"/g) ?? []).length, 1, 'one credit bar');
+assert.ok(!/dsum-quota-warn|dsum-quota-full/.test(credits), 'low usage must not warn');
+// Purchased-only accounts have no allowance to divide by, and must not warn.
+const purchasedOnly = runQuota('k', { purchased: { balance_usd: 25 } });
+assert.match(purchasedOnly, /purchased \$25\.00/);
+assert.ok(!/dsum-quota-warn|dsum-quota-full/.test(purchasedOnly), 'no allowance means no usage state');
+
+// Nearly-exhausted allowance warns, and an overdrawn one clamps and flags.
+assert.match(runQuota('k', { included: { balance_usd: 5, allowance_usd: 100 } }), /dsum-quota-warn/);
+const overdrawn = runQuota('k', { included: { balance_usd: 0, allowance_usd: 100 } });
+assert.match(overdrawn, /width:100\.0%/, 'width must clamp at 100%');
+assert.match(overdrawn, /dsum-quota-full/);
+
+// Legacy plans answer with remaining_percent (how much is LEFT), which must be
+// inverted into a used fraction before it reaches the bars.
+const legacy = runQuota('k', {
+    included: {
+        session: { remaining_percent: 25, resets_at: '2026-10-01T07:00:00Z' },
+        weekly: { remaining_percent: 60, resets_at: '2026-10-05T00:00:00Z' },
+    },
+    purchased: { balance_usd: 25 },
+});
+assert.match(legacy, /width:75\.0%/, 'session: 25% remaining means 75% used');
+assert.match(legacy, /width:40\.0%/, 'weekly: 60% remaining means 40% used');
+assert.equal((legacy.match(/role="progressbar"/g) ?? []).length, 2, 'legacy shape keeps two bars');
+// A nearly-spent session window must warn through the legacy path too.
+assert.match(runQuota('k', { included: { session: { remaining_percent: 5 } } }), /dsum-quota-warn/);
+
+console.log('renderQuota: credit balance, legacy windows, clamping, and states ok');
+
+// quotaFrom: the two response shapes, and values that must stay null rather
+// than becoming 0 (which would read as "fully unused").
+const parseQuota = quotaFrom;
+assert.deepEqual(parseQuota(undefined), {
+    includedUsd: null, allowance: null, periodUntil: null, purchasedUsd: null, session: null, weekly: null,
+}, 'a missing body must not fabricate a zero balance');
+assert.equal(parseQuota({ included: { balance_usd: 0 } }).includedUsd, 0, 'a real zero must survive');
+assert.equal(parseQuota({ included: { balance_usd: '72.5' } }).includedUsd, 72.5, 'numeric strings must parse');
+assert.equal(parseQuota({ included: { balance_usd: null } }).includedUsd, null, 'null must not become 0');
+assert.equal(parseQuota({ included: { period: { until: '2026-10-15T09:30:00Z' } } }).periodUntil, '2026-10-15T09:30:00Z');
+// `usage` (0..1 used) wins when a server still sends the older field, and
+// remaining_percent is inverted when only that is present.
+assert.equal(parseQuota({ included: { session: { usage: 0.3 } } }).session, 0.3, 'usage is already a used fraction');
+const eightyLeft = parseQuota({ included: { session: { remaining_percent: 80 } } }).session;
+assert.ok(Math.abs(eightyLeft - 0.2) < 1e-9, '80% left is 20% used');
+assert.equal(parseQuota({ included: { session: { remaining_percent: 0 } } }).session, 1, 'nothing left is fully used');
+
+console.log('quotaFrom: balance parsing ok');

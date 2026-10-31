@@ -38,7 +38,7 @@
         source: 'fallback',
         fetchedAt: null,
     };
-    let ollamaQuota = { session: null, weekly: null };
+    let ollamaQuota = emptyQuota();
 
     // Balance state from the plugin's live /balance endpoint.
     let balance = { infos: [], isAvailable: true };
@@ -78,19 +78,33 @@
     // Response bodies carry no `chat_completion_source`, so the request that
     // produced them is passed in - without it a `:cloud` model whose name is also
     // in the DeepSeek table would be attributed to the wrong provider.
+    //
+    // Ollama's native metrics follow the same convention the shim inherits:
+    // `prompt_eval_count` is the whole prompt and `prompt_eval_cached_count` the
+    // part served from cache, so the miss is the difference between them. The
+    // cached count is optional in Ollama's API types (an `*int`), so it is read
+    // as a separate fallback rather than being folded into a single `?? 0`.
     function usageFrom(body, request = {}) {
         const model = String(body.model || request.model || '');
         const source = body.chat_completion_source ?? request.source ?? '';
         const usage = body.usage;
         if (!usage || !providerFor(model, source)) return null;
-        const hit = usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0;
+        const prompt = usage.prompt_tokens ?? usage.prompt_eval_count ?? 0;
+        const hit = usage.prompt_cache_hit_tokens
+            ?? usage.prompt_tokens_details?.cached_tokens
+            ?? usage.prompt_eval_cached_count
+            ?? 0;
+        // A provider reporting more cached than prompt tokens must not yield a
+        // negative miss: the cost math would subtract money instead of charging
+        // for the uncached remainder.
+        const cached = Math.min(hit, prompt);
         return {
             model,
             source,
-            prompt_tokens: usage.prompt_tokens ?? 0,
-            prompt_cache_hit_tokens: hit,
-            prompt_cache_miss_tokens: usage.prompt_cache_miss_tokens ?? Math.max(0, (usage.prompt_tokens ?? 0) - hit),
-            completion_tokens: usage.completion_tokens ?? 0,
+            prompt_tokens: prompt,
+            prompt_cache_hit_tokens: cached,
+            prompt_cache_miss_tokens: usage.prompt_cache_miss_tokens ?? Math.max(0, prompt - cached),
+            completion_tokens: usage.completion_tokens ?? usage.eval_count ?? 0,
             total_tokens: usage.total_tokens ?? 0,
             captured_at: new Date().toISOString(),
         };
@@ -179,6 +193,40 @@
             return response;
         };
         window.fetch = patched;
+    }
+
+    // ollama.com/api/balance reports credit in USD inside `included` (a monthly
+    // allowance with its reset period) and `purchased`. Legacy plans answer with
+    // `session`/`weekly` percentage windows instead. Both shapes are accepted,
+    // including the `usage` field the meter used to read from the old endpoint.
+    //
+    // Declared as functions rather than consts: `ollamaQuota` is initialised at
+    // module top-level, so a `const` here would still be in its temporal dead
+    // zone and throw on load.
+    function emptyQuota() {
+        return { includedUsd: null, allowance: null, periodUntil: null, purchasedUsd: null, session: null, weekly: null };
+    }
+
+    function quotaFrom(body) {
+        const included = body?.included ?? {};
+        const num = value => (value !== null && value !== '' && Number.isFinite(Number(value)) ? Number(value) : null);
+        // Legacy plans report `remaining_percent` (0..100, still left); turn it
+        // into the 0..1 used fraction the bars draw. `usage` is the older shape
+        // the meter read before, kept so an un-updated server still works.
+        const window = limit => {
+            const used = num(limit?.usage);
+            if (used != null) return used;
+            const remaining = num(limit?.remaining_percent);
+            return remaining == null ? null : Math.min(1, Math.max(0, 1 - remaining / 100));
+        };
+        return {
+            includedUsd: num(included.balance_usd),
+            allowance: num(included.allowance_usd),
+            periodUntil: included.period?.until ?? null,
+            purchasedUsd: num(body?.purchased?.balance_usd),
+            session: window(included.session),
+            weekly: window(included.weekly),
+        };
     }
 
     const n = value => new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(Number(value ?? 0));
@@ -484,19 +532,53 @@
         if (utcClock) utcClock.textContent = `UTC ${utcTimeNow()}`;
     }
 
-    // Session (5h) and weekly (7d) allowance, as the two bars ollama.com shows.
-    // `usage` is a 0..1 fraction of the window, not a token or dollar amount.
+    // Credit balance, as ollama.com/api/balance reports it: an included monthly
+    // allowance plus any unexpired purchased credits, both in USD. Legacy plans
+    // still answer with `session`/`weekly` percentage windows instead, so both
+    // shapes are rendered rather than assuming the new one.
     function renderQuota() {
         const node = document.querySelector('#dsum-quota');
         if (!node) return;
         if (!settings.ollamaApiKey) {
-            node.innerHTML = '<div class="dsum-quota-hint">Add an Ollama API key to show the session and weekly usage bars.</div>';
+            node.innerHTML = '<div class="dsum-quota-hint">Add an Ollama API key to show your credit balance.</div>';
             return;
         }
-        if (ollamaQuota.session == null && ollamaQuota.weekly == null) {
-            node.innerHTML = '<div class="dsum-quota-hint">Ollama quota unavailable.</div>';
+        if (hasLegacyQuota()) {
+            renderLegacyQuota(node);
             return;
         }
+        const included = ollamaQuota.includedUsd;
+        const purchased = ollamaQuota.purchasedUsd;
+        if (included == null && purchased == null) {
+            node.innerHTML = '<div class="dsum-quota-hint">Ollama balance unavailable.</div>';
+            return;
+        }
+        // The bar tracks how much of the included allowance is left, because that
+        // is the credit that actually expires on the period reset.
+        const used = included == null || !ollamaQuota.allowance
+            ? null
+            : Math.min(1, Math.max(0, 1 - included / ollamaQuota.allowance));
+        const pct = used == null ? 0 : used * 100;
+        const state = used == null ? '' : used >= 1 ? ' dsum-quota-full' : used >= 0.9 ? ' dsum-quota-warn' : '';
+        const reset = ollamaQuota.periodUntil ? ` · resets ${new Date(ollamaQuota.periodUntil).toLocaleDateString()}` : '';
+        const purchasedText = purchased == null ? '' : `purchased ${money(purchased)}`;
+        node.innerHTML = `<div class="dsum-quota-row${state}">
+            <span class="dsum-quota-label">Included <span class="dsum-quota-unit">${ollamaQuota.allowance == null ? '' : `of ${money(ollamaQuota.allowance)}`}</span></span>
+            <span class="dsum-quota-track" role="progressbar" aria-label="Included allowance used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct)}" aria-valuetext="${used == null ? 'unavailable' : `${pct.toFixed(1)}% used`}">
+                <span class="dsum-quota-fill" style="width:${pct.toFixed(1)}%"></span>
+            </span>
+            <span class="dsum-quota-value">${included == null ? '-' : money(included)}</span>
+        </div>
+        <div class="dsum-quota-hint">${included == null ? '' : `${money(included)} included${reset}`}${purchasedText ? ` · ${purchasedText}` : ''}</div>`;
+    }
+
+    function hasLegacyQuota() {
+        return ollamaQuota.session != null || ollamaQuota.weekly != null;
+    }
+
+    // Session (5h) and weekly (7d) allowance, the two bars legacy plans show.
+    // `usage` is a 0..1 fraction of the window, not a token or dollar amount.
+    function renderLegacyQuota(node) {
         const bars = [['Session', '5h', ollamaQuota.session], ['Weekly', '7d', ollamaQuota.weekly]];
         node.innerHTML = bars.map(([label, span, value]) => {
             const fraction = value == null ? null : Math.min(1, Math.max(0, Number(value)));
@@ -513,24 +595,27 @@
     }
 
     const quotaPct = value => value == null ? '-' : `${(Number(value) * 100).toFixed(1)}%`;
-    const quotaText = () => ollamaQuota.session == null
-        ? (settings.ollamaApiKey ? 'Ollama quota unavailable' : 'Ollama API key not set')
-        : `Ollama ${quotaPct(ollamaQuota.session)} of 5h · ${quotaPct(ollamaQuota.weekly)} of 7d`;
+    const quotaText = () => {
+        if (!settings.ollamaApiKey) return 'Ollama API key not set';
+        if (hasLegacyQuota()) return `Ollama ${quotaPct(ollamaQuota.session)} of 5h · ${quotaPct(ollamaQuota.weekly)} of 7d`;
+        if (ollamaQuota.includedUsd == null && ollamaQuota.purchasedUsd == null) return 'Ollama balance unavailable';
+        const included = ollamaQuota.includedUsd == null
+            ? null
+            : `${money(ollamaQuota.includedUsd)}${ollamaQuota.allowance == null ? '' : ` of ${money(ollamaQuota.allowance)}`} included`;
+        const purchased = ollamaQuota.purchasedUsd == null ? null : `${money(ollamaQuota.purchasedUsd)} purchased`;
+        return ['Ollama', [included, purchased].filter(Boolean).join(' · ')].join(' ');
+    };
 
     async function refreshOllamaQuota() {
         if (!settings.ollamaApiKey) {
-            ollamaQuota = { session: null, weekly: null };
+            ollamaQuota = emptyQuota();
         } else {
             try {
                 const response = await fetch(meterUrl('/ollama/usage'), { headers: headers() });
-                if (!response.ok) throw new Error(`Ollama usage returned ${response.status}`);
-                const body = await response.json();
-                ollamaQuota = {
-                    session: body?.limits?.session?.usage ?? null,
-                    weekly: body?.limits?.weekly?.usage ?? null,
-                };
+                if (!response.ok) throw new Error(`Ollama balance returned ${response.status}`);
+                ollamaQuota = quotaFrom(await response.json());
             } catch (error) {
-                ollamaQuota = { session: null, weekly: null };
+                ollamaQuota = emptyQuota();
                 console.debug('[DeepSeek Usage Meter]', error.message);
             }
         }

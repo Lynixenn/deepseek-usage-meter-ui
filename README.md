@@ -24,11 +24,12 @@ Restart the server and refresh the page. If your profile isn't `default-user`, c
 
 ## Ollama Cloud
 
-Ollama Cloud models are priced per million tokens on [ollama.com/pricing](https://ollama.com/pricing), with a peak surcharge (×2) for the DeepSeek models between 12:00 and 18:00 UTC, Monday to Friday. Both are scraped live and applied per message, the same way the DeepSeek rates are.
+Ollama Cloud models are priced per million tokens on [ollama.com/pricing](https://ollama.com/pricing), where the DeepSeek models carry a peak rate (double) inside 12:00-18:00 UTC on weekdays; every other model has a single rate. The table is scraped live and applied per message, the same way the DeepSeek rates are.
 
 - Point SillyTavern at a **Custom (OpenAI-compatible)** source with `http://localhost:11434/v1` — Ollama's OpenAI shim reports `prompt_tokens_details.cached_tokens`, which the meter needs for the cached/fresh split
+- Ollama's native metrics (`prompt_eval_count`, `prompt_eval_cached_count`, `eval_count`) are understood too, and are folded onto the same cached/fresh fields, so a response is priced the same whichever endpoint produced it. `prompt_eval_cached_count` was added to the API recently and is optional, so its absence is treated as "nothing was cached" rather than as an error
 - Streamed replies only carry usage when the request asks for it, and SillyTavern rebuilds the upstream body from a fixed allow-list that has no `stream_options`. The meter appends `stream_options.include_usage: true` to the Custom source's **Include body** YAML for you on each request (your own YAML and a `stream_options` you set yourself are left alone), so nothing needs configuring by hand
 - The provider is resolved per message, so DeepSeek and Ollama chats can be interleaved; peak detection uses the UTC window for Ollama and the Beijing one for DeepSeek
-- The session/weekly quota windows (`session` = 5h, `weekly` = 7d) need an **Ollama API key** in Settings > DeepSeek Usage Meter; it is only forwarded to `ollama.com/api/usage` and never persisted server-side
+- Your credit balance needs an **Ollama API key** in Settings > DeepSeek Usage Meter; it is only forwarded to `ollama.com/api/balance` and never persisted server-side. The meter shows the remaining included allowance against its monthly allowance, plus any unexpired purchased credits. Older plans that still answer with `session` (5h) and `weekly` (7d) percentage windows get those two bars instead
 - Local (non-cloud) Ollama models are not in the pricing table and are left unpriced rather than mis-billed
 - Cache hits are only reported when Ollama's cache actually serves one: a stable system prompt and growing history hit, while two unrelated one-shot prompts usually miss
