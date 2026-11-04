@@ -15,7 +15,7 @@ const body = [
     slice('function extractUsage(', 'function requestUsage('),
     slice('function requestUsage(', 'function patchFetch('),
 ].join('\n');
-const build = new Function('pricing', 'ollama', `${body}\nreturn { usageFrom, extractUsage, requestUsage, cost, providerFor, priceFor };`);
+const build = new Function('pricing', 'ollama', `${body}\nreturn { usageFrom, extractUsage, requestUsage, mergeBodyYaml, thinkValue, nativeBody, sameUrl, cost, providerFor, priceFor };`);
 
 const pricing = {
     models: { 'deepseek-v4-pro': { cache_hit: 0.022, cache_miss: 0.66, output: 1.98 } },
@@ -248,3 +248,28 @@ assert.ok(Math.abs(eightyLeft - 0.2) < 1e-9, '80% left is 20% used');
 assert.equal(parseQuota({ included: { session: { remaining_percent: 0 } } }).session, 1, 'nothing left is fully used');
 
 console.log('quotaFrom: balance parsing ok');
+
+// mergeBodyYaml: every layout must stay valid YAML, or ST silently drops the
+// user's whole Include body. Valid JSON is valid YAML, so the `{...}` case can be
+// checked with JSON.parse.
+const merged = api.mergeBodyYaml('{"reasoning_effort": "high"}', { stream_options: { include_usage: true } });
+assert.deepEqual(JSON.parse(merged), { reasoning_effort: 'high', stream_options: { include_usage: true } });
+assert.deepEqual(JSON.parse(api.mergeBodyYaml('{}', { think: true })), { think: true });
+assert.equal(api.mergeBodyYaml('- a: 1\n', { think: 'high' }), '- a: 1\n- think: "high"\n');
+assert.equal(api.mergeBodyYaml('', { think: false, num_ctx: 8192 }), 'think: false\nnum_ctx: 8192\n');
+assert.equal(api.mergeBodyYaml('think: true\n', { think: false }), 'think: true\n', 'a value the user set wins');
+assert.equal(api.mergeBodyYaml('{"think": true}', { think: false }), '{"think": true}');
+assert.equal(api.mergeBodyYaml('overthink: 1\n', { think: true }), 'overthink: 1\nthink: true\n', 'keys match whole names only');
+assert.equal(api.mergeBodyYaml(undefined, {}), undefined);
+
+// thinkValue / nativeBody: what the Ollama panel sends.
+assert.equal(api.thinkValue('follow', 'auto'), undefined, 'auto must leave the model default alone');
+assert.equal(api.thinkValue('follow', 'min'), 'low');
+assert.equal(api.thinkValue('follow', 'max'), 'max');
+assert.equal(api.thinkValue('default', 'high'), undefined);
+assert.equal(api.thinkValue('off', 'high'), false);
+assert.equal(api.thinkValue('on', 'auto'), true);
+assert.deepEqual(api.nativeBody({ ollamaThink: 'high', ollamaNumCtx: 16384, ollamaKeepAlive: ' 30m ' }), { think: 'high', num_ctx: 16384, keep_alive: '30m' });
+assert.deepEqual(api.nativeBody({ ollamaThink: 'default', ollamaNumCtx: 0, ollamaKeepAlive: '' }), {});
+assert.equal(api.sameUrl('http://127.0.0.1:11435/v1/', 'http://127.0.0.1:11435/v1'), true);
+console.log('native Ollama helpers: all checks passed');
