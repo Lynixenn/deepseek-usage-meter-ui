@@ -1042,6 +1042,14 @@
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, render);
     eventSource.on(event_types.MESSAGE_SWIPED, mesId => render(mesId)); // each swipe shows its own usage
     eventSource.on(event_types.GENERATION_ENDED, attachLatestUsage);
+    // Presets store the Custom endpoint by default, so switching to one saved
+    // before Ollama (Native) was picked would silently drop back to Custom. ST
+    // hands listeners a copy of the preset, so this does not change what is saved.
+    if (event_types.OAI_PRESET_CHANGED_BEFORE) {
+        eventSource.on(event_types.OAI_PRESET_CHANGED_BEFORE, ({ preset }) => {
+            if (nativeBridge && sameUrl(context.chatCompletionSettings.custom_url, nativeBridge.url)) delete preset.custom_url;
+        });
+    }
     eventSource.on(event_types.CHAT_CHANGED, () => {
         context.chat.forEach((_, i) => render(i));
         renderChatTotals();

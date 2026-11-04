@@ -44,6 +44,6 @@ With the server plugin running, **Chat Completion Source** gains an **Ollama (Na
 
 Keep **Request model reasoning** on, or SillyTavern hides the thinking block. Reasoning also counts against Max Response Length.
 
-The entry is the Custom source pointed at the bridge, so its model list, API key and Additional Parameters all still apply, and presets and connection profiles remember it. Anything you set yourself in Include body takes priority over these controls. Picking **Custom (OpenAI-compatible)** restores the endpoint you had before. The entry does not appear if the bridge is off or could not start; the server console says why.
+The entry is the Custom source pointed at the bridge, so its model list, API key and Additional Parameters all still apply, and presets and connection profiles remember it. Anything you set yourself in Include body takes priority over these controls. While it is selected, switching presets keeps you on it, even if a preset was saved with another endpoint. A connection profile still applies its own saved endpoint, so update any profile that should use this entry. Picking **Custom (OpenAI-compatible)** restores the endpoint you had before. The entry does not appear if the bridge is off or could not start; the server console says why.
 
 Usage and cost work the same as on `/v1`, including the cached/fresh split when Ollama reports `prompt_eval_cached_count`.
