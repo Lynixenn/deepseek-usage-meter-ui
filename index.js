@@ -142,10 +142,45 @@
         const isOllama = providerFor(parsed.model, parsed.chat_completion_source) === 'ollama'
             || /:11434\b|\/ollama\b/i.test(String(parsed.custom_url ?? ''));
         if (!isOllama) return;
-        const yaml = String(parsed.custom_include_body ?? '');
-        if (/stream_options\s*:/.test(yaml)) return;
+        parsed.custom_include_body = mergeBodyYaml(parsed.custom_include_body, { stream_options: { include_usage: true } });
+    }
+
+    // ST only sends Reasoning Effort for Custom sources when the model id is an
+    // official OpenAI one, so an Ollama model never gets it. Ollama's /v1 does
+    // accept `reasoning_effort`, so it travels through Include body instead.
+    // 'auto' leaves the model default alone.
+    function ollamaReasoningEffort(showThoughts, stEffort) {
+        if (showThoughts === false) return 'none';
+        return { min: 'low', low: 'low', medium: 'medium', high: 'high', max: 'max' }[stEffort];
+    }
+
+    function requestThinking(parsed, settings) {
+        if (parsed.chat_completion_source !== 'custom') return;
+        if (!/:11434\b|\/ollama\b/i.test(String(parsed.custom_url ?? ''))) return;
+        const effort = ollamaReasoningEffort(settings?.show_thoughts, settings?.reasoning_effort);
+        if (effort) parsed.custom_include_body = mergeBodyYaml(parsed.custom_include_body, { reasoning_effort: effort });
+    }
+
+    // Adds keys to the Include body text, leaving anything already set alone: a
+    // duplicate key, or a line appended after a `{...}` block, makes the text
+    // invalid YAML, and ST then silently drops all of it. The text can be any of
+    // three layouts, so additions are written in whichever one it already uses.
+    function mergeBodyYaml(text, additions) {
+        const yaml = String(text ?? '');
         const existing = yaml.trimEnd();
-        parsed.custom_include_body = `${existing ? `${existing}\n` : ''}stream_options:\n  include_usage: true\n`;
+        const fresh = Object.entries(additions).filter(([key]) => !new RegExp(`(^|[\\s{,'"-])${key}['"]?\\s*:`, 'm').test(yaml));
+        if (!fresh.length) return text;
+        if (existing.trimStart().startsWith('{')) {
+            const inner = existing.slice(0, existing.lastIndexOf('}')).trimEnd();
+            const pairs = fresh.map(([key, value]) => `"${key}": ${JSON.stringify(value)}`).join(', ');
+            return `${inner}${inner.endsWith('{') ? '' : ','} ${pairs} }\n`;
+        }
+        const block = ([key, value]) => (value && typeof value === 'object'
+            ? `${key}:\n${Object.entries(value).map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`).join('\n')}`
+            : `${key}: ${JSON.stringify(value)}`);
+        const prefix = existing.trimStart().startsWith('-') ? '- ' : '';
+        const lines = fresh.map(entry => `${prefix}${prefix ? `${entry[0]}: ${JSON.stringify(entry[1])}` : block(entry)}`);
+        return `${existing ? `${existing}\n` : ''}${lines.join('\n')}\n`;
     }
 
     function patchFetch() {
@@ -164,6 +199,7 @@
                 if (parsed) {
                     request = { model: parsed.model, source: parsed.chat_completion_source };
                     requestUsage(parsed);
+                    requestThinking(parsed, context.chatCompletionSettings);
                     init = { ...init, body: JSON.stringify(parsed) };
                     // Hold the request until the once-per-page-load peak confirm
                     // is answered; the request is not sent until Continue is clicked.

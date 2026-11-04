@@ -15,7 +15,7 @@ const body = [
     slice('function extractUsage(', 'function requestUsage('),
     slice('function requestUsage(', 'function patchFetch('),
 ].join('\n');
-const build = new Function('pricing', 'ollama', `${body}\nreturn { usageFrom, extractUsage, requestUsage, cost, providerFor, priceFor };`);
+const build = new Function('pricing', 'ollama', `${body}\nreturn { usageFrom, extractUsage, requestUsage, requestThinking, ollamaReasoningEffort, mergeBodyYaml, cost, providerFor, priceFor };`);
 
 const pricing = {
     models: { 'deepseek-v4-pro': { cache_hit: 0.022, cache_miss: 0.66, output: 1.98 } },
@@ -248,3 +248,32 @@ assert.ok(Math.abs(eightyLeft - 0.2) < 1e-9, '80% left is 20% used');
 assert.equal(parseQuota({ included: { session: { remaining_percent: 0 } } }).session, 1, 'nothing left is fully used');
 
 console.log('quotaFrom: balance parsing ok');
+
+// mergeBodyYaml: every layout must stay valid YAML, or ST silently drops the
+// user's whole Include body. Valid JSON is valid YAML, so the `{...}` case can be
+// checked with JSON.parse.
+const merged = api.mergeBodyYaml('{"top_a": 0.5}', { stream_options: { include_usage: true } });
+assert.deepEqual(JSON.parse(merged), { top_a: 0.5, stream_options: { include_usage: true } });
+assert.deepEqual(JSON.parse(api.mergeBodyYaml('{}', { reasoning_effort: 'high' })), { reasoning_effort: 'high' });
+assert.equal(api.mergeBodyYaml('- a: 1\n', { reasoning_effort: 'high' }), '- a: 1\n- reasoning_effort: "high"\n');
+assert.equal(api.mergeBodyYaml('reasoning_effort: low\n', { reasoning_effort: 'high' }), 'reasoning_effort: low\n', 'a value the user set wins');
+assert.equal(api.mergeBodyYaml('{"reasoning_effort": "low"}', { reasoning_effort: 'high' }), '{"reasoning_effort": "low"}');
+
+// Reasoning Effort reaches Ollama through Include body.
+assert.equal(api.ollamaReasoningEffort(true, 'auto'), undefined, 'auto must leave the model default alone');
+assert.equal(api.ollamaReasoningEffort(true, 'min'), 'low');
+assert.equal(api.ollamaReasoningEffort(true, 'max'), 'max');
+assert.equal(api.ollamaReasoningEffort(false, 'high'), 'none', 'Request model reasoning off turns thinking off');
+const thinking = { chat_completion_source: 'custom', custom_url: 'http://localhost:11434/v1' };
+api.requestThinking(thinking, { show_thoughts: true, reasoning_effort: 'high' });
+assert.equal(thinking.custom_include_body, 'reasoning_effort: "high"\n');
+const auto = { chat_completion_source: 'custom', custom_url: 'http://localhost:11434/v1' };
+api.requestThinking(auto, { show_thoughts: true, reasoning_effort: 'auto' });
+assert.equal(auto.custom_include_body, undefined);
+const elsewhere = { chat_completion_source: 'custom', custom_url: 'http://localhost:1234/v1' };
+api.requestThinking(elsewhere, { show_thoughts: true, reasoning_effort: 'high' });
+assert.equal(elsewhere.custom_include_body, undefined, 'must not inject into unrelated custom endpoints');
+const openai = { chat_completion_source: 'openai', custom_url: 'http://localhost:11434/v1' };
+api.requestThinking(openai, { show_thoughts: true, reasoning_effort: 'high' });
+assert.equal(openai.custom_include_body, undefined);
+console.log('Ollama reasoning effort: all checks passed');
