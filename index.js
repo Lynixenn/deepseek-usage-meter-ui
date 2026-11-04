@@ -930,6 +930,9 @@
         const active = source === 'custom' && sameUrl(url, nativeBridge.url);
         if (source === 'custom') (active ? option : plainCustomOption()).selected = true;
         $('#dsum-ollama-panel').toggle(active);
+        // The URL is what selects this entry, so it is not offered for editing here.
+        const urlRow = $('#custom_api_url_text').closest('.flex-container');
+        urlRow.prev('h4').add(urlRow).add(urlRow.next()).toggle(!active);
     }
 
     // Capture phase, so the URL is already right when ST's own change handler
