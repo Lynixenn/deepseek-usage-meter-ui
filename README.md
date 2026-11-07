@@ -33,3 +33,17 @@ Ollama Cloud models are priced per million tokens on [ollama.com/pricing](https:
 - Your credit balance needs an **Ollama API key** in Settings > DeepSeek Usage Meter; it is only forwarded to `ollama.com/api/balance` and never persisted server-side. The meter shows the remaining included allowance against its monthly allowance, plus any unexpired purchased credits. Older plans that still answer with `session` (5h) and `weekly` (7d) percentage windows get those two bars instead
 - Local (non-cloud) Ollama models are not in the pricing table and are left unpriced rather than mis-billed
 - Cache hits are only reported when Ollama's cache actually serves one: a stable system prompt and growing history hit, while two unrelated one-shot prompts usually miss
+
+## Ollama (Native)
+
+With the server plugin running, **Chat Completion Source** gains an **Ollama (Native)** entry. It talks to Ollama's `/api/chat` through the plugin's bridge, and shows these settings above the endpoint field:
+
+- **Thinking**: sent as Ollama's `think`. **Follow Reasoning Effort** uses SillyTavern's own Reasoning Effort setting, which SillyTavern does not send for Custom sources, and leaves the model default on Auto. Which level names a model accepts depends on the model: Ollama falls back to the model default for one it does not support, so use **On** for models that only have on and off
+- **Context size**: sent as `num_ctx`
+- **Keep model loaded**: sent as `keep_alive`
+
+Keep **Request model reasoning** on, or SillyTavern hides the thinking block. Reasoning also counts against Max Response Length.
+
+SillyTavern's source list is built into its core, so the entry is the Custom source pointed at the bridge. Its model list, API key and Additional Parameters all still apply, and the endpoint field is hidden while the entry is selected. Anything you set yourself in Include body takes priority over these controls. While it is selected, switching presets keeps you on it, even if a preset was saved with another endpoint. A connection profile still applies its own saved endpoint, so update any profile that should use this entry. Picking **Custom (OpenAI-compatible)** restores the endpoint you had before. The entry does not appear if the bridge is off or could not start; the server console says why.
+
+Usage and cost work the same as on `/v1`, including the cached/fresh split when Ollama reports `prompt_eval_cached_count`.

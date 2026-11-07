@@ -4,6 +4,10 @@
         meterToken: '',
         ollamaApiKey: '',
         testMode: false,
+        ollamaThink: 'follow',
+        ollamaNumCtx: 0,
+        ollamaKeepAlive: '',
+        ollamaPreviousUrl: '',
     };
 
     const context = SillyTavern.getContext();
@@ -39,6 +43,10 @@
         fetchedAt: null,
     };
     let ollamaQuota = emptyQuota();
+
+    // The native bridge's address, from the server plugin. Null until it answers,
+    // and while it stays null the Ollama (Native) source is not offered.
+    let nativeBridge = null;
 
     // Balance state from the plugin's live /balance endpoint.
     let balance = { infos: [], isAvailable: true };
@@ -142,11 +150,51 @@
         const isOllama = providerFor(parsed.model, parsed.chat_completion_source) === 'ollama'
             || /:11434\b|\/ollama\b/i.test(String(parsed.custom_url ?? ''));
         if (!isOllama) return;
-        const yaml = String(parsed.custom_include_body ?? '');
-        if (/stream_options\s*:/.test(yaml)) return;
-        const existing = yaml.trimEnd();
-        parsed.custom_include_body = `${existing ? `${existing}\n` : ''}stream_options:\n  include_usage: true\n`;
+        parsed.custom_include_body = mergeBodyYaml(parsed.custom_include_body, { stream_options: { include_usage: true } });
     }
+
+    // Adds keys to the Include body text, leaving anything already set alone: a
+    // duplicate key, or a line appended after a `{...}` block, makes the text
+    // invalid YAML, and ST then silently drops all of it. The text can be any of
+    // three layouts, so additions are written in whichever one it already uses.
+    function mergeBodyYaml(text, additions) {
+        const yaml = String(text ?? '');
+        const existing = yaml.trimEnd();
+        const fresh = Object.entries(additions).filter(([key]) => !new RegExp(`(^|[\\s{,'"-])${key}['"]?\\s*:`, 'm').test(yaml));
+        if (!fresh.length) return text;
+        if (existing.trimStart().startsWith('{')) {
+            const inner = existing.slice(0, existing.lastIndexOf('}')).trimEnd();
+            const pairs = fresh.map(([key, value]) => `"${key}": ${JSON.stringify(value)}`).join(', ');
+            return `${inner}${inner.endsWith('{') ? '' : ','} ${pairs} }\n`;
+        }
+        const block = ([key, value]) => (value && typeof value === 'object'
+            ? `${key}:\n${Object.entries(value).map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`).join('\n')}`
+            : `${key}: ${JSON.stringify(value)}`);
+        const prefix = existing.trimStart().startsWith('-') ? '- ' : '';
+        const lines = fresh.map(entry => `${prefix}${prefix ? `${entry[0]}: ${JSON.stringify(entry[1])}` : block(entry)}`);
+        return `${existing ? `${existing}\n` : ''}${lines.join('\n')}\n`;
+    }
+
+    // SillyTavern's own Reasoning Effort setting, which it does not send for Custom
+    // sources, onto Ollama's `think`. 'auto' leaves the choice to the model.
+    function thinkValue(choice, stEffort) {
+        const fromSillyTavern = { min: 'low', low: 'low', medium: 'medium', high: 'high', max: 'max' };
+        const named = { off: false, on: true, low: 'low', medium: 'medium', high: 'high', max: 'max' };
+        return choice === 'follow' ? fromSillyTavern[stEffort] : named[choice];
+    }
+
+    function nativeBody(options, stEffort) {
+        const think = thinkValue(options.ollamaThink, stEffort);
+        const numCtx = Number(options.ollamaNumCtx);
+        const keepAlive = String(options.ollamaKeepAlive ?? '').trim();
+        return {
+            ...(think === undefined ? {} : { think }),
+            ...(numCtx > 0 ? { num_ctx: numCtx } : {}),
+            ...(keepAlive ? { keep_alive: keepAlive } : {}),
+        };
+    }
+
+    const sameUrl = (a, b) => String(a ?? '').replace(/\/+$/, '') === String(b ?? '').replace(/\/+$/, '');
 
     function patchFetch() {
         const realFetch = window.fetch.bind(window);
@@ -164,6 +212,10 @@
                 if (parsed) {
                     request = { model: parsed.model, source: parsed.chat_completion_source };
                     requestUsage(parsed);
+                    if (parsed.chat_completion_source === 'custom' && nativeBridge && sameUrl(parsed.custom_url, nativeBridge.url)) {
+                        const body = nativeBody(settings, context.chatCompletionSettings?.reasoning_effort);
+                        parsed.custom_include_body = mergeBodyYaml(parsed.custom_include_body, body);
+                    }
                     init = { ...init, body: JSON.stringify(parsed) };
                     // Hold the request until the once-per-page-load peak confirm
                     // is answered; the request is not sent until Continue is clicked.
@@ -854,6 +906,119 @@
         document.querySelector('#dsum-refresh').addEventListener('click', () => { refreshBalance(); fetchPricing(); fetchOllamaPricing(); });
     }
 
+    // --- Ollama (Native) source ---------------------------------------------------
+    // Core sources are a fixed list in SillyTavern, so this entry is the Custom
+    // source pointed at the plugin's bridge: it shares the value 'custom' and the
+    // endpoint URL is what tells the two apart. That keeps the choice in ST's own
+    // settings, so presets and connection profiles carry it with no extra state.
+    const sourceSelect = () => document.querySelector('#chat_completion_source');
+    const nativeOption = () => document.querySelector('#dsum-ollama-source');
+    const plainCustomOption = () => sourceSelect()?.querySelector('option[value="custom"]:not(#dsum-ollama-source)');
+
+    function setCustomUrl(url) {
+        context.chatCompletionSettings.custom_url = url;
+        $('#custom_api_url_text').val(url);
+    }
+
+    // ST reassigns the select's value by plain 'custom', which cannot tell the two
+    // options apart, so the visible choice is re-derived after anything that can
+    // change the source or the URL.
+    function syncNativeSource() {
+        const option = nativeOption();
+        if (!option || !nativeBridge) return;
+        const { chat_completion_source: source, custom_url: url } = context.chatCompletionSettings;
+        const active = source === 'custom' && sameUrl(url, nativeBridge.url);
+        if (source === 'custom') (active ? option : plainCustomOption()).selected = true;
+        $('#dsum-ollama-panel').toggle(active);
+        // The URL is what selects this entry, so it is not offered for editing here.
+        const urlRow = $('#custom_api_url_text').closest('.flex-container');
+        urlRow.prev('h4').add(urlRow).add(urlRow.next()).toggle(!active);
+    }
+
+    // Capture phase, so the URL is already right when ST's own change handler
+    // reconnects; otherwise it would fetch the model list from the old endpoint.
+    function onSourcePicked() {
+        const select = sourceSelect();
+        const picked = select.options[select.selectedIndex];
+        const url = context.chatCompletionSettings.custom_url;
+        if (picked === nativeOption() && !sameUrl(url, nativeBridge.url)) {
+            settings.ollamaPreviousUrl = url;
+            setCustomUrl(nativeBridge.url);
+            context.saveSettingsDebounced();
+        } else if (picked === plainCustomOption() && sameUrl(url, nativeBridge.url)) {
+            setCustomUrl(settings.ollamaPreviousUrl);
+            context.saveSettingsDebounced();
+        }
+    }
+
+    function renderNativeStatus(status) {
+        const node = document.querySelector('#dsum-ollama-status');
+        if (!node) return;
+        const ok = status.reachable;
+        node.textContent = ok
+            ? `Ollama ${status.version} at ${status.upstream}`
+            : `Ollama not reachable at ${status.upstream}`;
+        node.className = `dsum-ollama-status ${ok ? 'dsum-ok' : 'dsum-bad'}`;
+    }
+
+    function addNativePanel() {
+        $('#custom_form').prepend(`
+          <div id="dsum-ollama-panel" class="dsum-ollama-panel" style="display:none">
+            <h4>Ollama (Native)</h4>
+            <div id="dsum-ollama-status" class="dsum-ollama-status"></div>
+            <label for="dsum-ollama-think">Thinking</label>
+            <select id="dsum-ollama-think" class="text_pole">
+              <option value="follow">Follow Reasoning Effort</option>
+              <option value="default">Model default</option>
+              <option value="off">Off</option>
+              <option value="on">On</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="max">Max</option>
+            </select>
+            <label for="dsum-ollama-ctx">Context size (num_ctx, 0 = model default)</label>
+            <input id="dsum-ollama-ctx" class="text_pole" type="number" min="0" step="1024">
+            <label for="dsum-ollama-keep">Keep model loaded (keep_alive, e.g. 30m or -1)</label>
+            <input id="dsum-ollama-keep" class="text_pole" type="text" placeholder="Ollama default">
+          </div>`);
+        for (const [selector, key, read] of [
+            ['#dsum-ollama-think', 'ollamaThink', value => value],
+            ['#dsum-ollama-ctx', 'ollamaNumCtx', value => Math.max(0, Number(value) || 0)],
+            ['#dsum-ollama-keep', 'ollamaKeepAlive', value => value.trim()],
+        ]) {
+            const input = document.querySelector(selector);
+            input.value = settings[key];
+            input.addEventListener('input', () => {
+                settings[key] = read(input.value);
+                context.saveSettingsDebounced();
+            });
+        }
+    }
+
+    async function addNativeSource() {
+        try {
+            const response = await fetch(meterUrl('/ollama/native/status'), { headers: headers() });
+            if (!response.ok) throw new Error(`Bridge status returned ${response.status}`);
+            const status = await response.json();
+            if (!status.running) throw new Error(status.error || 'Bridge is not running');
+            nativeBridge = status;
+            if (!nativeOption()) {
+                const select = sourceSelect();
+                const option = new Option('Ollama (Native)', 'custom');
+                option.id = 'dsum-ollama-source';
+                plainCustomOption()?.after(option);
+                select.addEventListener('change', onSourcePicked, true);
+                addNativePanel();
+                $('#custom_api_url_text').on('input', syncNativeSource);
+            }
+            renderNativeStatus(status);
+            syncNativeSource();
+        } catch (error) {
+            console.debug('[DeepSeek Usage Meter]', error.message);
+        }
+    }
+
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'dsum',
         callback: async () => { await openUsagePopup(); return ''; },
@@ -868,14 +1033,26 @@
     fetchOllamaPricing();
     refreshBalance();
     renderChatTotals();
+    addNativeSource();
     setInterval(fetchPricing, 10 * 60 * 1000); // keep peak-hour detection current across session
     setInterval(fetchOllamaPricing, 10 * 60 * 1000);
     setInterval(() => { refreshBalance(); updateStatusline(); }, 10 * 60 * 1000); // keep balance/quota + clocks fresh
     setInterval(updateStatusline, 30 * 1000); // Beijing clock tick
     eventSource.on(event_types.APP_READY, addWandButton); // auto-fires if the app is already ready
+    for (const event of ['APP_READY', 'CHATCOMPLETION_SOURCE_CHANGED', 'PRESET_CHANGED', 'CONNECTION_PROFILE_LOADED', 'SETTINGS_UPDATED']) {
+        if (event_types[event]) eventSource.on(event_types[event], syncNativeSource);
+    }
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, render);
     eventSource.on(event_types.MESSAGE_SWIPED, mesId => render(mesId)); // each swipe shows its own usage
     eventSource.on(event_types.GENERATION_ENDED, attachLatestUsage);
+    // Presets store the Custom endpoint by default, so switching to one saved
+    // before Ollama (Native) was picked would silently drop back to Custom. ST
+    // hands listeners a copy of the preset, so this does not change what is saved.
+    if (event_types.OAI_PRESET_CHANGED_BEFORE) {
+        eventSource.on(event_types.OAI_PRESET_CHANGED_BEFORE, ({ preset }) => {
+            if (nativeBridge && sameUrl(context.chatCompletionSettings.custom_url, nativeBridge.url)) delete preset.custom_url;
+        });
+    }
     eventSource.on(event_types.CHAT_CHANGED, () => {
         context.chat.forEach((_, i) => render(i));
         renderChatTotals();
